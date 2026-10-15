@@ -1,0 +1,26 @@
+{
+  "name": "redacted-fps",
+  "version": "1.0.0",
+  "description": "REDACTED - a browser first-person shooter made by Divan",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node tools/sim-test.mjs",
+    "guns": "node tools/build-guns.mjs"
+  },
+  "author": "Divan",
+  "license": "UNLICENSED",
+  "type": "module",
+  "dependencies": {
+    "ws": "^8.22.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "private": true,
+  "devDependencies": {
+    "@fontsource/rajdhani": "^5.2.5",
+    "@fontsource/teko": "^5.2.5",
+    "three": "^0.180.0"
+  }
+}

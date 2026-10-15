@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>REDACTED</title>
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js", "three/addons/": "./vendor/addons/" } }
+</script>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="grain"></div>
+
+<!-- ============================== LOADING -->
+<div id="loading" class="screen">
+  <div class="load-title">RED<span class="bar">ACT</span>ED</div>
+  <div class="load-sub">DECLASSIFYING FILES…</div>
+  <div class="load-track"><div id="load-fill"></div></div>
+  <div id="load-msg">Loading weapons</div>
+</div>
+
+<!-- ============================== MAIN MENU -->
+<div id="menu" class="screen" hidden>
+  <header class="topbar">
+    <button id="btn-admin" class="admin-btn" title="Admin">ADMIN</button>
+    <label class="callsign">CALLSIGN <input id="name-input" maxlength="16" spellcheck="false" autocomplete="off"></label>
+    <div id="net-status" class="net">CONNECTING…</div>
+    <div class="coins"><span class="coin-ico"></span><span id="coin-count">0</span></div>
+  </header>
+
+  <div class="menu-center">
+    <h1 class="title" data-text="REDACTED">RED<span class="redact">ACT</span>ED</h1>
+    <div class="title-sub">COVERT OPERATIONS // FILE 1962-1989</div>
+
+    <nav class="menu-grid">
+      <button id="btn-party" class="mbtn party"><span class="mb-label">PARTY</span><span class="mb-sub" id="party-sub">Squad up with a code</span></button>
+      <button id="btn-play" class="mbtn play"><span class="mb-label">PLAY</span><span class="mb-sub">Free for all · 2 teams · 4 teams</span></button>
+      <button id="btn-shop" class="mbtn shop"><span class="mb-label">SHOP</span><span class="mb-sub">50 weapons · operator</span></button>
+    </nav>
+  </div>
+
+  <div class="loadout-card">
+    <div class="lc-label">EQUIPPED</div>
+    <div id="lc-icon" class="gun-icon"></div>
+    <div id="lc-name">—</div>
+  </div>
+</div>
+
+<!-- ============================== ADMIN dialog -->
+<div id="admin-dlg" class="modal" hidden>
+  <div class="modal-box">
+    <div class="pc-label">RESTRICTED ACCESS</div>
+    <h2>ADMIN</h2>
+    <div id="admin-login">
+      <input id="admin-pw" type="password" placeholder="Password" autocomplete="off" maxlength="100">
+      <div class="err" id="admin-err"></div>
+      <div class="modal-row"><button id="admin-cancel" class="btn ghost">CANCEL</button><button id="admin-go" class="btn accent">UNLOCK</button></div>
+    </div>
+    <div id="admin-panel" hidden>
+      <p class="admin-note">Admin is unlocked for this session.</p>
+      <div class="admin-toggles">
+        <button class="opt" data-admin="fly">FLY <span class="key">F</span></button>
+        <button class="opt" data-admin="esp">ESP <span class="key">G</span></button>
+        <button class="opt active" disabled>UNLIMITED COINS ✓</button>
+      </div>
+      <p class="admin-note small">In a match: <b>F</b> toggles fly (SPACE up, C down, SHIFT fast) · <b>G</b> toggles ESP (see everyone through walls).</p>
+      <div class="modal-row"><button id="admin-lock" class="btn ghost">LOCK ADMIN</button><button id="admin-close" class="btn accent">DONE</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== PLAY: mode select -->
+<div id="panel-play" class="panel" hidden>
+  <div class="panel-head"><button class="back">‹ BACK</button><h2>SELECT MODE</h2></div>
+  <div class="modes">
+    <button class="mode" data-mode="ffa"><div class="mode-ico ffa"></div><h3>FREE FOR ALL</h3><p>Every operator for themselves. First to 25 eliminations wins.</p></button>
+    <button class="mode" data-mode="tdm"><div class="mode-ico tdm"></div><h3>TWO TEAMS</h3><p>Raven vs Wolf. First team to 60 eliminations.</p></button>
+    <button class="mode" data-mode="four"><div class="mode-ico four"></div><h3>FOUR TEAMS</h3><p>Four squads, one winner. First team to 40.</p></button>
+  </div>
+  <p class="mode-note" id="mode-note">Matches hold up to 64 players. Empty slots are filled with bots. Every round is on a random map.</p>
+</div>
+
+<!-- ============================== PARTY -->
+<div id="panel-party" class="panel" hidden>
+  <div class="panel-head"><button class="back">‹ BACK</button><h2>PARTY</h2></div>
+  <div class="party-wrap">
+    <div class="party-left">
+      <div class="party-code-box">
+        <div class="pc-label">YOUR PARTY CODE</div>
+        <div id="party-code" class="pc-digits">-----</div>
+        <div class="pc-hint">Tell your friends this code. When the leader hits PLAY, the whole party joins the same match and team.</div>
+        <button id="party-new" class="btn">NEW CODE</button>
+        <button id="party-leave" class="btn ghost">LEAVE PARTY</button>
+      </div>
+      <div class="party-bots-box" id="bots-box">
+        <div class="bots-head">
+          <span class="bots-title">[BOTS]</span>
+          <button id="bots-toggle" class="bots-toggle" aria-pressed="true" title="Turn bots on or off"><span class="bt-ico">✓</span><span class="bt-lbl">ON</span></button>
+        </div>
+        <div id="bots-count-row" class="bots-count-row">
+          <span class="bots-lbl">HOW MANY</span>
+          <input type="range" id="bots-range" min="1" max="200" value="8">
+          <input type="number" id="bots-num" min="1" max="200" value="8">
+        </div>
+        <div class="pc-hint" id="bots-hint"></div>
+      </div>
+    </div>
+    <div class="party-side">
+      <div class="pc-label">JOIN A FRIEND</div>
+      <div class="join-row">
+        <input id="party-input" inputmode="numeric" maxlength="5" placeholder="00000" autocomplete="off">
+        <button id="party-join" class="btn accent">JOIN</button>
+      </div>
+      <div id="party-err" class="err"></div>
+      <div class="pc-label" style="margin-top:22px">MEMBERS</div>
+      <ul id="party-members"></ul>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== SHOP -->
+<div id="panel-shop" class="panel wide" hidden>
+  <div class="panel-head">
+    <button class="back">‹ BACK</button><h2>SHOP</h2>
+    <div class="tabs"><button class="tab active" data-tab="weapons">WEAPONS</button><button class="tab" data-tab="operator">OPERATOR</button></div>
+    <div class="coins small"><span class="coin-ico"></span><span class="coin-count">0</span></div>
+  </div>
+  <div id="tab-weapons" class="tab-body">
+    <div class="filters" id="gun-filters"></div>
+    <div class="shop-split">
+      <div class="gun-grid" id="gun-grid"></div>
+      <div class="gun-detail" id="gun-detail"></div>
+    </div>
+  </div>
+  <div id="tab-operator" class="tab-body" hidden>
+    <div class="op-editor" id="op-editor"></div>
+  </div>
+</div>
+
+<!-- ============================== HUD -->
+<div id="hud" hidden>
+  <canvas id="esp"></canvas>
+  <div id="admin-ind" hidden></div>
+  <div class="hud-tl">
+    <div id="hud-mode">FREE FOR ALL</div>
+    <div id="hud-timer">6:00</div>
+    <div id="hud-scores"></div>
+  </div>
+  <div class="hud-tr">
+    <canvas id="minimap" width="200" height="200"></canvas>
+    <div id="hud-map">CITADEL</div>
+  </div>
+  <div id="killfeed"></div>
+  <div class="hud-bl">
+    <div class="hp-label">HEALTH</div>
+    <div class="hp-track"><div id="hp-fill"></div></div>
+  </div>
+  <div class="hud-br">
+    <div id="hud-gun" class="gun-icon"></div>
+    <div class="ammo"><span id="ammo-mag">30</span><span class="ammo-sep">/</span><span id="ammo-res">120</span></div>
+    <div id="hud-gunname">KR-47</div>
+    <div id="reload-hint"></div>
+  </div>
+
+  <div id="crosshair"><i class="c-t"></i><i class="c-b"></i><i class="c-l"></i><i class="c-r"></i><i class="c-dot"></i></div>
+  <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+  <div id="dmg-indicators"></div>
+  <div id="vignette"></div>
+  <div id="scope" hidden><div class="scope-ring"></div></div>
+  <div id="target-name"></div>
+  <div id="kill-pop"></div>
+  <div id="hud-hint"></div>
+
+  <div id="eliminated" hidden><div class="elim-text">ELIMINATED</div><div id="elim-by"></div><div id="elim-timer"></div></div>
+  <div id="winner" hidden><div id="win-text" class="win-text">WINNER</div><div id="win-sub"></div><div id="win-coins"></div><div id="win-next"></div></div>
+  <div id="scoreboard" hidden></div>
+  <div id="deploy" hidden><div class="deploy-box"><div class="deploy-map" id="deploy-map">CITADEL</div><div class="deploy-sub" id="deploy-sub"></div><button id="deploy-btn" class="btn accent big">CLICK TO DEPLOY</button><div class="controls-help">WASD move · SPACE jump · SHIFT sprint · C crouch · MOUSE aim &amp; shoot · RIGHT CLICK aim down sights · R reload · TAB scores · ESC pause</div></div></div>
+  <div id="pause" hidden>
+    <div class="pause-box">
+      <h2>PAUSED</h2>
+      <button id="pause-resume" class="btn accent big">RESUME</button>
+      <label class="set">MOUSE SENSITIVITY <input id="set-sens" type="range" min="0.2" max="3" step="0.05"><span id="set-sens-v"></span></label>
+      <label class="set">FIELD OF VIEW <input id="set-fov" type="range" min="60" max="100" step="1"><span id="set-fov-v"></span></label>
+      <label class="set">VOLUME <input id="set-vol" type="range" min="0" max="1" step="0.05"><span id="set-vol-v"></span></label>
+      <label class="set">GRAPHICS <select id="set-quality"><option value="auto">AUTO (recommended)</option><option value="low">LOW (school laptop)</option><option value="med">MEDIUM</option><option value="high">HIGH</option></select></label>
+      <label class="set">SHOW FPS <input id="set-fps" type="checkbox"></label>
+      <button id="pause-leave" class="btn ghost">LEAVE MATCH</button>
+    </div>
+  </div>
+  <div id="fps"></div>
+</div>
+
+<div id="made-by">Made by Divan</div>
+<div id="toast"></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
