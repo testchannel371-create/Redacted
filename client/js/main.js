@@ -282,7 +282,15 @@ function buildMenu() {
   });
   name.addEventListener('keydown', (e) => { if (e.key === 'Enter') name.blur(); });
   const click = (id, fn) => $(id).addEventListener('click', () => { sfx.init(); sfx.ui(); fn(); });
-  click('btn-play', () => showScreen('play'));
+  click('btn-play', () => {
+    // in someone else's party only the leader can start: send friends to the party screen instead
+    if (party && party.members.length > 1 && !amLeader()) {
+      toast(`Waiting for ${leaderName()} (party leader) to start the match`);
+      showScreen('party'); renderParty();
+      return;
+    }
+    showScreen('play');
+  });
   click('btn-shop', () => { showScreen('shop'); renderShop(); });
   click('btn-party', () => {
     showScreen('party');
@@ -292,12 +300,13 @@ function buildMenu() {
   });
   document.querySelectorAll('.panel .back').forEach(b => b.addEventListener('click', () => { sfx.ui(); showScreen('menu'); }));
   addEventListener('keydown', (e) => { if (e.key === 'Escape' && screen && screen !== 'menu' && !game.active) showScreen('menu'); });
-  document.querySelectorAll('.mode').forEach(b => b.addEventListener('click', () => {
+  // mode buttons on the PLAY screen and the START MATCH buttons on the PARTY screen
+  document.querySelectorAll('.mode, .pmode').forEach(b => b.addEventListener('click', () => {
     sfx.init(); sfx.uiConfirm();
     if (!myId) return toast('Still connecting… try again in a second.');
     net.send({ t: 'loadout', gun: profile.gun, skin: profile.skin });
     net.send({ t: 'play', mode: b.dataset.mode, bots: profile.bots });
-    toast('Finding a match…');
+    toast(party && party.members.length > 1 ? `Starting a match for your party (${party.members.length} players)…` : 'Finding a match…');
   }));
   // party
   const pin = $('party-input');
@@ -345,9 +354,20 @@ function renderParty() {
   const ul = $('party-members');
   ul.innerHTML = party ? party.members.map(m => `<li>${esc(m.name)}${m.id === party.leader ? ' <span class="lead">LEADER</span>' : ''}${m.id === myId ? ' <span class="you">YOU</span>' : ''}${m.inMatch ? ' <span class="you">IN MATCH</span>' : ''}</li>`).join('') : '';
   $('party-leave').disabled = !party || party.members.length < 2;
-  $('party-sub').textContent = party && party.members.length > 1 ? `Party ${party.code} · ${party.members.length} members` : 'Squad up with a code';
+  const multi = party && party.members.length > 1, lead = amLeader();
+  $('party-sub').textContent = multi ? `Party ${party.code} · ${party.members.length} members` : 'Squad up with a code';
+  $('play-sub').textContent = multi && !lead ? `Waiting for ${leaderName()} to start` : 'Free for all · 2 teams · 4 teams';
+  // START MATCH box: the leader picks a mode here, everyone else waits for the leader
+  $('party-modes').hidden = !lead;
+  $('party-wait').textContent = lead
+    ? (multi ? `Pick a mode and all ${party.members.length} of you join the same match and team.` : 'Pick a mode to start. Friends who join your code will come with you.')
+    : `Waiting for ${leaderName()} (the party leader) to start the match…`;
   if (!net.online) $('party-err').textContent = 'Parties need the online server — friends cannot join offline practice.';
   renderBots();
+}
+
+function leaderName() {
+  return party?.members.find(m => m.id === party.leader)?.name || 'the leader';
 }
 
 const canAfford = (price) => admin.on || profile.coins >= price;   // admins have unlimited coins

@@ -169,6 +169,11 @@ body.ingame #grain { background: radial-gradient(ellipse at center, transparent 
 .err { color: var(--red); min-height: 22px; margin-top: 8px; font-size: 16px; }
 #party-members { list-style: none; padding: 0; margin: 8px 0 0; }
 #party-members li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 19px; }
+#panel-party { overflow-y: auto; }
+.party-start { margin-top: 22px; }
+.party-modes { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 8px; }
+.party-modes .btn { flex: 1 1 auto; font-size: 24px; padding: 8px 12px 3px; }
+#party-wait { margin: 4px 0 0; }
 #party-members li .lead { color: var(--accent); font-size: 13px; letter-spacing: 2px; }
 #party-members li .you { color: var(--dim); font-size: 13px; letter-spacing: 2px; }
 

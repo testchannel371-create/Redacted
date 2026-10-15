@@ -36,7 +36,7 @@
 
     <nav class="menu-grid">
       <button id="btn-party" class="mbtn party"><span class="mb-label">PARTY</span><span class="mb-sub" id="party-sub">Squad up with a code</span></button>
-      <button id="btn-play" class="mbtn play"><span class="mb-label">PLAY</span><span class="mb-sub">Free for all · 2 teams · 4 teams</span></button>
+      <button id="btn-play" class="mbtn play"><span class="mb-label">PLAY</span><span class="mb-sub" id="play-sub">Free for all · 2 teams · 4 teams</span></button>
       <button id="btn-shop" class="mbtn shop"><span class="mb-label">SHOP</span><span class="mb-sub">50 weapons · operator</span></button>
     </nav>
   </div>
@@ -116,6 +116,15 @@
       <div id="party-err" class="err"></div>
       <div class="pc-label" style="margin-top:22px">MEMBERS</div>
       <ul id="party-members"></ul>
+      <div class="party-start">
+        <div class="pc-label">START MATCH</div>
+        <div class="party-modes" id="party-modes">
+          <button class="btn accent pmode" data-mode="ffa">FREE FOR ALL</button>
+          <button class="btn accent pmode" data-mode="tdm">TWO TEAMS</button>
+          <button class="btn accent pmode" data-mode="four">FOUR TEAMS</button>
+        </div>
+        <div class="pc-hint" id="party-wait"></div>
+      </div>
     </div>
   </div>
 </div>
