@@ -21,6 +21,7 @@ The **ADMIN** button in the top-left of the menu asks for the admin password. On
 
 - **Fly**: press **F** in a match. SPACE goes up, C goes down, SHIFT goes fast. There's no gravity and you pass through walls.
 - **ESP**: press **G**. Every player gets a box with their name and distance, visible through walls.
+- **AIMBOT**: press **H**. While you hold right click or shoot, your aim snaps to the nearest visible enemy near your crosshair (head first, chest if the head is hidden). ESP shows the locked target in yellow.
 - **Unlimited coins**: coins show ∞ and every gun in the shop is free.
 
 Admin lasts until you close the tab. The password is checked on the server and is never sent to players' browsers. Each address gets 15 tries per 10 minutes.
