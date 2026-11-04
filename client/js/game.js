@@ -167,15 +167,17 @@ export class Game {
     addEventListener('keydown', (e) => {
       if (!this.active) return;
       if (e.code === 'Tab') { e.preventDefault(); this.showBoard(true); }
+      if (this.ended && /^Digit[1-9]$/.test(e.code) && !e.repeat) this.castVote(Number(e.code[5]) - 1);
       if (document.pointerLockElement) {
         if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'ShiftLeft', 'KeyR'].includes(e.code)) e.preventDefault();
         this.keys.add(e.code);
         if (e.code === 'KeyR') this.startReload();
         const adm = this.app.admin;
-        if (adm?.on && (e.code === 'KeyF' || e.code === 'KeyG' || e.code === 'KeyH') && !e.repeat) {
+        if (adm?.on && ['KeyF', 'KeyG', 'KeyH', 'KeyJ'].includes(e.code) && !e.repeat) {
           if (e.code === 'KeyF') adm.fly = !adm.fly;
           else if (e.code === 'KeyG') adm.esp = !adm.esp;
-          else adm.aim = !adm.aim;
+          else if (e.code === 'KeyH') adm.aim = !adm.aim;
+          else { adm.god = !adm.god; this.app.net.send({ t: 'admin_god', on: adm.god }); }
           this.renderAdmin();
           this.app.sfx.ui();
         }
@@ -209,6 +211,7 @@ export class Game {
       if (locked) $('deploy').hidden = true;
       if (!locked) { this.keys.clear(); this.mouse.l = this.mouse.r = false; }
     });
+    $('vote-row').onclick = (e) => { const b = e.target.closest('[data-i]'); if (b) this.castVote(Number(b.dataset.i)); };
     $('deploy-btn').onclick = () => this.lock();
     $('pause-resume').onclick = () => this.lock();
     $('pause-leave').onclick = () => this.leave();
@@ -219,7 +222,7 @@ export class Game {
     const c = this.app.renderer.domElement;
     try {
       const p = c.requestPointerLock({ unadjustedMovement: true });
-      if (p && p.catch) p.catch(() => { try { c.requestPointerLock(); } catch {} });
+      if (p && p.catch) p.catch(() => { try { c.requestPointerLock()?.catch?.(() => {}); } catch {} });
     } catch { try { c.requestPointerLock(); } catch {} }
   }
 
@@ -235,6 +238,7 @@ export class Game {
       case 'hm': return this.onHitmarker(m);
       case 'kill': return this.onKill(m);
       case 'end': return this.onEnd(m);
+      case 'vt': return this.renderVote(m.c);
       case 'pj': this.addPlayer(m.p); return;
       case 'pl': this.removePlayer(m.id); return;
       case 'pi': this.updatePlayer(m.p); return;
@@ -268,6 +272,7 @@ export class Game {
     $('deploy-sub').textContent = MAPS[m.map].sub + ' · ' + this.mode.name + ' · ROUND ' + m.round;
     this.renderScores();
     if (!document.pointerLockElement) { $('deploy').hidden = false; $('pause').hidden = true; }
+    if (this.relock) { this.relock = false; this.lock(); } // back into the action after voting; the deploy button is the fallback
     if (first) this.app.onEnterGame();
     this.toastMap(m);
     this.renderAdmin();
@@ -496,6 +501,7 @@ export class Game {
     $('eliminated').hidden = true;
     document.body.classList.remove('dead');
     $('pause').hidden = true;
+    $('deploy').hidden = true;
     $('winner').hidden = false;
     const wt = $('win-text');
     if (m.won) {
@@ -512,15 +518,39 @@ export class Game {
       $('win-coins').textContent = `Win to earn ${50 + 50 * Math.max(0, Math.ceil((m.players - 10) / 5))} coins (${m.players} players)`;
     }
     let left = m.next;
-    $('win-next').textContent = `NEXT MAP IN ${left}`;
+    const voteText = () => `VOTE FOR THE NEXT MAP: CLICK OR PRESS 1, 2, 3 · ${left}`;
+    $('win-next').textContent = voteText();
     clearInterval(this.nextTI);
     this.nextTI = setInterval(() => {
       left--;
       if (left <= 0 || !this.ended) { clearInterval(this.nextTI); return; }
-      $('win-next').textContent = `NEXT MAP IN ${left}`;
+      $('win-next').textContent = voteText();
     }, 1000);
     this.board = m.board;
     this.showBoard(true, true);
+    // the map vote needs the mouse cursor back
+    this.voteMaps = m.vote;
+    this.myVote = -1;
+    $('vote-row').innerHTML = m.vote.map((id, i) => `<button class="vote-card" data-i="${i}"><span class="vk">${i + 1}</span><span class="vn">${MAPS[id].name}</span><span class="vs">${MAPS[id].sub}</span><span class="vc"></span></button>`).join('');
+    this.renderVote(m.vote.map(() => 0));
+    this.relock = !!document.pointerLockElement;
+    if (this.relock) document.exitPointerLock();
+  }
+
+  castVote(i) {
+    if (!this.ended || this.voteMaps[i] === undefined) return;
+    this.myVote = i;
+    this.app.sfx.ui();
+    this.app.net.send({ t: 'vote', map: this.voteMaps[i] });
+    this.renderVote();
+  }
+
+  renderVote(counts = this.voteCounts) {
+    this.voteCounts = counts;
+    [...$('vote-row').children].forEach((b, i) => {
+      b.classList.toggle('mine', i === this.myVote);
+      b.querySelector('.vc').textContent = `${counts[i]} VOTE${counts[i] === 1 ? '' : 'S'}`;
+    });
   }
 
   leave() {
@@ -532,6 +562,7 @@ export class Game {
   exit() {
     this.active = false;
     this.ended = false;
+    this.relock = false;
     clearInterval(this.nextTI);
     if (document.pointerLockElement) document.exitPointerLock();
     for (const id of [...this.remote.keys()]) this.removePlayer(id);
@@ -1006,8 +1037,8 @@ export class Game {
   renderAdmin() {
     const a = this.app.admin, el = $('admin-ind');
     el.hidden = !a?.on;
-    if (a?.on) el.textContent = 'ADMIN' + (a.fly ? ' · FLY' : '') + (a.esp ? ' · ESP' : '') + (a.aim ? ' · AIMBOT' : '') +
-      (!a.fly && !a.esp && !a.aim ? ' · F = FLY · G = ESP · H = AIMBOT' : '');
+    if (a?.on) el.textContent = 'ADMIN' + (a.fly ? ' · FLY' : '') + (a.esp ? ' · ESP' : '') + (a.aim ? ' · AIMBOT' : '') + (a.god ? ' · GODMODE' : '') +
+      (!a.fly && !a.esp && !a.aim && !a.god ? ' · F = FLY · G = ESP · H = AIMBOT · J = GODMODE' : '');
   }
 
   // Aimbot target: the enemy closest to the crosshair (within ~35°) that can actually be hit (no wall in the way).

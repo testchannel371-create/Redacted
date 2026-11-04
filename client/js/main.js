@@ -6,6 +6,7 @@ import { Sfx } from './audio.js';
 import { Game } from './game.js';
 import { MenuScene } from './menu3d.js';
 import { DEFAULT_SKIN, cleanSkin, SKIN_OPTIONS, cleanBots, MAX_BOTS } from '../shared/core.js';
+import { MAPS } from '../shared/maps.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -120,7 +121,7 @@ function setStatus(text, cls) {
 let party = null, myId = null, serverInfo = null;
 
 // ------------------------------------------------------------------ admin (password is checked by the server)
-const admin = { on: false, fly: false, esp: false, aim: false };
+const admin = { on: false, fly: false, esp: false, aim: false, god: false };
 let adminPw = null; // kept in memory only for this tab, never saved
 app.admin = admin;
 
@@ -160,13 +161,14 @@ function buildAdmin() {
   $('admin-close').addEventListener('click', close);
   $('admin-dlg').addEventListener('click', (e) => { if (e.target === $('admin-dlg')) close(); });
   $('admin-lock').addEventListener('click', () => {
-    admin.on = admin.fly = admin.esp = admin.aim = false; adminPw = null;
+    admin.on = admin.fly = admin.esp = admin.aim = admin.god = false; adminPw = null;
     net.send({ t: 'admin_off' });
     renderAdmin(); close(); toast('Admin locked');
   });
   document.querySelectorAll('[data-admin]').forEach(b => b.addEventListener('click', () => {
     if (!admin.on) return;
     admin[b.dataset.admin] = !admin[b.dataset.admin];
+    if (b.dataset.admin === 'god') net.send({ t: 'admin_god', on: admin.god });
     sfx.ui(); renderAdmin();
   }));
   renderAdmin();
@@ -182,7 +184,8 @@ function updateModeNote() {
   const where = net.online
     ? `Matches hold up to ${serverInfo ? serverInfo.perMatch : 64} players (server max ${serverInfo ? serverInfo.max : 200}).`
     : 'No server found, so this is offline practice. Run the server ("npm start") to play with friends.';
-  $('mode-note').textContent = `${bots} ${where} Every round is on a random map. Change bots in PARTY.`;
+  const map = `The first map is ${b.map >= 0 ? MAPS[b.map].name : 'random'}, then everyone votes for the next one after each round.`;
+  $('mode-note').textContent = `${bots} ${where} ${map} Change bots and the map in PARTY.`;
 }
 
 function renderBots() {
@@ -194,6 +197,9 @@ function renderBots() {
   tg.querySelector('.bt-lbl').textContent = b.on ? 'ON' : 'OFF';
   tg.disabled = !lead;
   $('bots-count-row').classList.toggle('off', !b.on || !lead);
+  $('bots-aim-row').classList.toggle('off', !b.on || !lead);
+  document.querySelectorAll('[data-skill]').forEach(c => c.classList.toggle('active', c.dataset.skill === b.skill));
+  document.querySelectorAll('[data-map]').forEach(c => { c.classList.toggle('active', Number(c.dataset.map) === b.map); c.disabled = !lead; });
   if (document.activeElement !== $('bots-num')) $('bots-num').value = b.count;
   $('bots-range').value = b.count;
   $('bots-range').disabled = $('bots-num').disabled = !lead;
@@ -227,11 +233,12 @@ function wireNet() {
     if (m.ok) {
       admin.on = true;
       $('admin-err').textContent = '';
-      if (!adminPw) toast('Admin unlocked: fly (F), ESP (G), aimbot (H), unlimited coins');
+      if (!adminPw) toast('Admin unlocked: fly (F), ESP (G), aimbot (H), godmode (J), unlimited coins');
       adminPw = adminPw || $('admin-pw').value;
       $('admin-pw').value = '';
+      if (admin.god) net.send({ t: 'admin_god', on: true }); // keep godmode after a reconnect
     } else {
-      admin.on = admin.fly = admin.esp = admin.aim = false; adminPw = null;
+      admin.on = admin.fly = admin.esp = admin.aim = admin.god = false; adminPw = null;
       $('admin-err').textContent = m.msg || 'Wrong password';
     }
     renderAdmin();
@@ -247,9 +254,19 @@ function wireNet() {
     net.goOffline();
     if (!full) keepTrying();
   });
-  net.on('party', (m) => { party = m.party; renderParty(); });
+  net.on('party', (m) => {
+    if (m.party?.code !== party?.code) { chat = []; unread = 0; renderChat(); } // a new party starts with an empty chat
+    party = m.party; renderParty();
+  });
+  net.on('chat', (m) => {
+    chat.push(m);
+    if (chat.length > 100) chat.shift();
+    renderChat();
+    if (screen !== 'party' && !m.sys) { unread++; renderParty(); }
+  });
+  net.on('parties', (m) => { openParties = m; renderOpenParties(); });
   net.on('party_err', (m) => { $('party-err').textContent = m.msg; toast(m.msg); });
-  for (const t of ['start', 'spawn', 's', 'sc', 'fx', 'dmg', 'hm', 'kill', 'end', 'pj', 'pl', 'pi', 'pos']) net.on(t, (m) => game.handle(m));
+  for (const t of ['start', 'spawn', 's', 'sc', 'fx', 'dmg', 'hm', 'kill', 'end', 'vt', 'pj', 'pl', 'pi', 'pos']) net.on(t, (m) => game.handle(m));
 }
 
 app.onEnterGame = () => { showScreen(null); };
@@ -307,7 +324,10 @@ function buildMenu() {
     showScreen('party');
     $('party-err').textContent = '';
     if (!party) net.send({ t: 'party_create' });
+    unread = 0;
     renderParty();
+    net.send({ t: 'parties' });
+    renderChat();
   });
   document.querySelectorAll('.panel .back').forEach(b => b.addEventListener('click', () => { sfx.ui(); showScreen('menu'); }));
   addEventListener('keydown', (e) => { if (e.key === 'Escape' && screen && screen !== 'menu' && !game.active) showScreen('menu'); });
@@ -331,8 +351,35 @@ function buildMenu() {
   pin.addEventListener('keydown', (e) => { if (e.key === 'Enter') join(); });
   $('party-new').addEventListener('click', () => { sfx.ui(); net.send({ t: 'party_create' }); });
   $('party-leave').addEventListener('click', () => { sfx.ui(); net.send({ t: 'party_leave' }); });
+  // party chat
+  const sendChat = () => {
+    const text = $('chat-input').value.trim();
+    if (!text) return;
+    net.send({ t: 'chat', text });
+    $('chat-input').value = '';
+  };
+  $('chat-send').addEventListener('click', () => { sfx.ui(); sendChat(); });
+  $('chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
+  // open parties list: JOIN buttons, kept fresh while the PARTY screen is open
+  $('open-list').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-code]'); if (!b) return;
+    sfx.ui();
+    $('party-err').textContent = '';
+    net.send({ t: 'party_join', code: b.dataset.code });
+  });
+  setInterval(() => { if (screen === 'party' && net.online) net.send({ t: 'parties' }); }, 3000);
   // [BOTS] option
   $('bots-toggle').addEventListener('click', () => { sfx.init(); sfx.ui(); setBots({ on: !profile.bots.on }); });
+  $('bots-aim-row').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-skill]'); if (!b) return;
+    sfx.ui(); setBots({ skill: b.dataset.skill });
+  });
+  // map picker (leader only): RANDOM or one fixed map
+  $('party-maps').innerHTML = [{ id: -1, name: 'RANDOM' }, ...MAPS].map(m => `<button class="chip" data-map="${m.id}">${m.name}</button>`).join('');
+  $('party-maps').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-map]'); if (!b) return;
+    sfx.ui(); setBots({ map: Number(b.dataset.map) });
+  });
   $('bots-range').addEventListener('input', (e) => setBots({ count: Number(e.target.value) }));
   const num = $('bots-num');
   num.max = MAX_BOTS; $('bots-range').max = MAX_BOTS;
@@ -366,7 +413,9 @@ function renderParty() {
   ul.innerHTML = party ? party.members.map(m => `<li>${esc(m.name)}${m.id === party.leader ? ' <span class="lead">LEADER</span>' : ''}${m.id === myId ? ' <span class="you">YOU</span>' : ''}${m.inMatch ? ' <span class="you">IN MATCH</span>' : ''}</li>`).join('') : '';
   $('party-leave').disabled = !party || party.members.length < 2;
   const multi = party && party.members.length > 1, lead = amLeader();
-  $('party-sub').textContent = multi ? `Party ${party.code} · ${party.members.length} members` : 'Squad up with a code';
+  $('party-sub').textContent = unread ? `${unread} new message${unread === 1 ? '' : 's'}` : multi ? `Party ${party.code} · ${party.members.length} members` : 'Squad up with a code';
+  $('chat-input').disabled = $('chat-send').disabled = !party || !net.online;
+  $('chat-input').placeholder = net.online ? 'Type a message…' : 'Chat needs the online server';
   $('play-sub').textContent = multi && !lead ? `Waiting for ${leaderName()} to start` : 'Free for all · 2 teams · 4 teams';
   // START MATCH box: the leader picks a mode here, everyone else waits for the leader
   $('party-modes').hidden = !lead;
@@ -375,6 +424,29 @@ function renderParty() {
     : `Waiting for ${leaderName()} (the party leader) to start the match…`;
   if (!net.online) $('party-err').textContent = 'Parties need the online server — friends cannot join offline practice.';
   renderBots();
+  renderOpenParties();
+}
+
+// Every party on the server except your own. Only redrawn when it changes, so a JOIN click never lands on a replaced button.
+let openParties = { list: [], max: 10 };
+function renderOpenParties() {
+  const list = net.online ? openParties.list.filter(p => p.code !== party?.code) : [];
+  const html = list.map(p => `<li><span class="op-name">${esc(p.leader)}'s party</span>${p.inMatch ? '<span class="op-tag">IN MATCH</span>' : ''}<span class="op-n">${p.n}/${openParties.max}</span><button class="btn accent" data-code="${esc(p.code)}">JOIN</button></li>`).join('');
+  if (html !== renderOpenParties.html) $('open-list').innerHTML = renderOpenParties.html = html;
+  $('open-count').textContent = list.length ? `(${list.length})` : '';
+  $('open-empty').hidden = list.length > 0;
+  $('open-empty').textContent = net.online ? 'No other parties right now. New ones show up here on their own.' : 'Parties need the online server.';
+}
+
+// Party chat: only the last 100 messages, only in this tab.
+let chat = [], unread = 0;
+function renderChat() {
+  const log = $('chat-log');
+  const atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
+  log.innerHTML = chat.map(m => (m.sys
+    ? `<div class="sys">${esc(m.text)}</div>`
+    : `<div><b class="${m.id === myId ? 'me' : ''}">${esc(m.name)}:</b> ${esc(m.text)}</div>`)).join('') || '<div class="none">No messages yet. Say hi!</div>';
+  if (atEnd) log.scrollTop = log.scrollHeight;
 }
 
 function leaderName() {
