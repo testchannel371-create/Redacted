@@ -21,6 +21,7 @@ export const EYE = 1.6, EYE_CROUCH = 1.15;
 export const F_ALIVE = 1, F_CROUCH = 2, F_MOVE = 4, F_SPRINT = 8, F_ADS = 16, F_RELOAD = 32, F_AIR = 64;
 
 const RESPAWN = 4, REGEN_DELAY = 4, REGEN_RATE = 35;
+const VOTE_SECONDS = 12, VOTE_CHOICES = 3;
 const BOT_GUNS = [0, 2, 3, 4, 5, 7, 9, 12, 17, 21];
 const BOT_NAMES = ['Mason', 'Woods', 'Hudson', 'Bowman', 'Reznov', 'Weaver', 'Crosby', 'Harper', 'Salazar', 'Nikolai',
   'Dragovich', 'Kravchenko', 'Steiner', 'Adler', 'Sims', 'Lazar', 'Park', 'Bell', 'Stitch', 'Vargas', 'Hollow', 'Grim',
@@ -48,11 +49,16 @@ export function cleanSkin(s) {
 export const SKIN_OPTIONS = SKIN_ENUMS;
 
 export const MAX_BOTS = 200;
+// aim scales the chance a bot's shot lands; react scales how long it takes to start and resume shooting
+export const BOT_SKILL = { easy: { aim: 0.18, react: 2.2 }, normal: { aim: 0.55, react: 1.4 }, hard: { aim: 1, react: 1 } };
+// The leader's match settings: bots, bot aim and the map (-1 = random).
 export function cleanBots(b) {
   const count = b && b.count != null ? Math.round(Number(b.count)) : NaN;
   return {
     on: b && typeof b.on === 'boolean' ? b.on : true,
     count: Number.isFinite(count) ? Math.max(1, Math.min(MAX_BOTS, count)) : 8,
+    skill: b && Object.hasOwn(BOT_SKILL, b.skill) ? b.skill : 'normal',
+    map: b && Number.isInteger(b.map) && b.map >= 0 && b.map < MAPS.length ? b.map : -1,
   };
 }
 
@@ -60,6 +66,8 @@ function cleanName(n) {
   n = String(n ?? '').replace(/[^\w .\-]/g, '').trim().slice(0, 16);
   return n || 'Operator';
 }
+const MAX_PARTY = 10;
+const MAX_CHAT = 200;
 const fin = (v) => typeof v === 'number' && Number.isFinite(v);
 const r2 = (v) => Math.round(v * 100);
 const r3 = (v) => Math.round(v * 1000);
@@ -113,6 +121,8 @@ export class GameServer {
       case 'party_create': this.partyCreate(c); break;
       case 'party_join': this.partyJoin(c, String(m.code ?? '')); break;
       case 'party_leave': this.partyLeave(c); break;
+      case 'parties': this.partyList(c); break;
+      case 'chat': this.partyChat(c, m.text); break;
       case 'bots':
         c.bots = cleanBots(m);
         if (c.party) { const p = this.parties.get(c.party); if (p && p.leader === c.id) this.partyBroadcast(p); }
@@ -124,9 +134,11 @@ export class GameServer {
       case 'leave': if (c.match) { c.match.remove(c.id); c.match = null; } break;
       case 'in': if (c.match) c.match.input(c, m); break;
       case 'sh': if (c.match) c.match.shoot(c, m); break;
+      case 'vote': if (c.match) c.match.vote(c, m.map); break;
       case 'ping': this.send(c, { t: 'pong', s: m.s }); break;
       case 'admin': this.adminLogin(c, m.pw); break;
-      case 'admin_off': c.admin = false; break;
+      case 'admin_off': c.admin = c.god = false; break;
+      case 'admin_god': c.god = !!c.admin && !!m.on; break;
     }
   }
 
@@ -159,11 +171,12 @@ export class GameServer {
     const p = this.parties.get(code);
     if (!p) return this.send(c, { t: 'party_err', msg: 'No party with code ' + code.replace(/\D/g, '').slice(0, 5) });
     if (p.members.includes(c.id)) return this.partyBroadcast(p);
-    if (p.members.length >= 10) return this.send(c, { t: 'party_err', msg: 'That party is full (10 max)' });
+    if (p.members.length >= MAX_PARTY) return this.send(c, { t: 'party_err', msg: `That party is full (${MAX_PARTY} max)` });
     this.partyLeave(c, true);
     p.members.push(c.id);
     c.party = code;
     this.partyBroadcast(p);
+    this.partySay(p, { t: 'chat', sys: true, text: `${c.name} joined the party` });
   }
 
   partyLeave(c, silent) {
@@ -175,8 +188,38 @@ export class GameServer {
     else {
       if (p.leader === c.id) p.leader = p.members[0];
       this.partyBroadcast(p);
+      this.partySay(p, { t: 'chat', sys: true, text: `${c.name} left the party` });
     }
     if (!silent) this.send(c, { t: 'party', party: null });
+  }
+
+  partySay(p, msg) {
+    for (const id of p.members) { const m = this.clients.get(id); if (m) this.send(m, msg); }
+  }
+
+  // Party chat: nothing is stored on the server, it only goes to the people in the party right now.
+  partyChat(c, text) {
+    const p = c.party && this.parties.get(c.party);
+    if (!p) return;
+    text = String(text ?? '').replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, MAX_CHAT);
+    if (!text) return;
+    if (this.time - (c.chatAt ?? -9) < 0.5) return this.send(c, { t: 'chat', sys: true, text: 'Slow down a little.' });
+    c.chatAt = this.time;
+    this.partySay(p, { t: 'chat', id: c.id, name: c.name, text });
+  }
+
+  // Parties anyone can join, for the list on the PARTY screen (biggest first, full ones left out).
+  partyList(c) {
+    if (this.time - (c.listAt ?? -9) < 0.4) return;
+    c.listAt = this.time;
+    const list = [];
+    for (const p of this.parties.values()) {
+      const leader = this.clients.get(p.leader);
+      if (!leader || p.members.length >= MAX_PARTY) continue;
+      list.push({ code: p.code, leader: leader.name, n: p.members.length, inMatch: !!leader.match });
+    }
+    list.sort((a, b) => b.n - a.n || a.code.localeCompare(b.code));
+    this.send(c, { t: 'parties', list: list.slice(0, 40), max: MAX_PARTY });
   }
 
   partyBroadcast(p) {
@@ -207,12 +250,12 @@ export class GameServer {
     let best = null;
     if (!botCount) {
       for (const m of this.matches) {
-        if (m.mode.id !== mode || m.dead || m.priv) continue;
+        if (m.mode.id !== mode || m.dead || m.priv || (c.bots.map >= 0 && m.mapId !== c.bots.map)) continue;
         if (m.humans() + group.length > this.maxPerMatch) continue;
         if (!best || m.humans() > best.humans()) best = m;
       }
     }
-    if (!best) { best = new Match(this, mode, botCount); this.matches.add(best); }
+    if (!best) { best = new Match(this, mode, botCount, c.bots); this.matches.add(best); }
     best.addGroup(group);
     if (c.party) this.partyBroadcast(this.parties.get(c.party));
   }
@@ -234,7 +277,7 @@ export class GameServer {
 
 // ==================================================================== Match
 class Match {
-  constructor(server, mode, botCount = 0) {
+  constructor(server, mode, botCount, settings) {
     this.s = server;
     this.mode = MODES[mode];
     this.priv = botCount > 0;   // private party match (no strangers)
@@ -243,7 +286,8 @@ class Match {
     this.id = server.nextMatch++;
     this.players = new Map();
     this.round = 0;
-    this.mapId = Math.floor(Math.random() * MAPS.length);
+    this.skill = BOT_SKILL[settings.skill];
+    this.mapId = settings.map >= 0 ? settings.map : Math.floor(Math.random() * MAPS.length); // later maps are voted on
     this.dead = false;
     this.scoreT = 0;
     this.botNames = [...BOT_NAMES].sort(() => Math.random() - 0.5);
@@ -278,11 +322,9 @@ class Match {
   }
 
   startRound(first) {
-    if (!first) {
-      let n;
-      do n = Math.floor(Math.random() * MAPS.length); while (n === this.mapId && MAPS.length > 1);
-      this.mapId = n;
-    }
+    if (!first) this.mapId = this.voteWinner();
+    this.votes = new Map();  // player id -> the map they voted for
+    this.voteMaps = [];
     this.md = mapData(this.mapId);
     this.round++;
     this.state = 'playing';
@@ -346,6 +388,7 @@ class Match {
     if (p.client && p.client.match === this) p.client.match = null;
     this.sendAll({ t: 'pl', id });
     if (this.humans() === 0) { this.dead = true; return; }
+    if (this.votes.delete(id)) this.sendAll({ t: 'vt', c: this.voteCounts() });
     this.balanceBots();
   }
 
@@ -491,11 +534,11 @@ class Match {
   }
 
   damage(t, a, dmg, head) {
-    if (!t.alive) return;
+    if (!t.alive || (t.client?.admin && t.client.god)) return; // admin godmode: takes no damage
     t.hp -= dmg;
     t.lastHit = this.now;
     if (t.client) this.s.send(t.client, { t: 'dmg', hp: Math.max(0, Math.round(t.hp)), from: a.id, x: r2(a.x), z: r2(a.z) });
-    if (t.bot && !t.bot.target) { t.bot.target = a; t.bot.react = 0.3; }
+    if (t.bot && !t.bot.target) { t.bot.target = a; t.bot.react = 0.3 * this.skill.react; }
     const killed = t.hp <= 0;
     if (a.client) this.s.send(a.client, { t: 'hm', k: killed ? 1 : 0, h: head ? 1 : 0 });
     if (killed) this.kill(t, a, head);
@@ -516,7 +559,8 @@ class Match {
   end(w) {
     if (this.state !== 'playing') return;
     this.state = 'ended';
-    this.endTimer = 12;
+    this.endTimer = VOTE_SECONDS;
+    this.voteMaps = MAPS.map(m => m.id).filter(id => id !== this.mapId).sort(() => Math.random() - 0.5).slice(0, VOTE_CHOICES);
     const n = this.humans(); // only real people count toward the coin reward (no farming with bots)
     const coins = coinsFor(n);
     const board = [...this.players.values()].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths)
@@ -526,8 +570,27 @@ class Match {
     for (const p of this.players.values()) {
       if (!p.client) continue;
       const won = this.mode.teams ? p.team === w.team : p.id === w.id;
-      this.s.send(p.client, { t: 'end', winner: name, team: w.team ?? -1, won, coins: won ? coins : 0, players: n, board, next: 12 });
+      this.s.send(p.client, { t: 'end', winner: name, team: w.team ?? -1, won, coins: won ? coins : 0, players: n, board, next: VOTE_SECONDS, vote: this.voteMaps });
     }
+  }
+
+  // Map vote between rounds: real players only, and they can change their mind until the timer runs out.
+  vote(c, map) {
+    if (this.state !== 'ended' || !this.voteMaps.includes(map) || this.votes.get(c.id) === map) return;
+    this.votes.set(c.id, map);
+    this.sendAll({ t: 'vt', c: this.voteCounts() });
+  }
+
+  voteCounts() {
+    const votes = [...this.votes.values()];
+    return this.voteMaps.map(id => votes.filter(v => v === id).length);
+  }
+
+  // Most votes wins. A tie (or nobody voting) is settled at random between the tied maps.
+  voteWinner() {
+    const counts = this.voteCounts(), top = Math.max(...counts);
+    const tied = this.voteMaps.filter((_, i) => counts[i] === top);
+    return tied[Math.floor(Math.random() * tied.length)];
   }
 
   // ---------------------------------------------------------------- tick
@@ -599,7 +662,7 @@ class Match {
           if (d < 65 * 65) cands.push([q, d]);
         }
         cands.sort((a, b) => a[1] - b[1]);
-        for (const [q] of cands.slice(0, 6)) if (this.los(p, q)) { B.target = q; B.react = 0.5 + Math.random() * 0.6; break; }
+        for (const [q] of cands.slice(0, 6)) if (this.los(p, q)) { B.target = q; B.react = (0.5 + Math.random() * 0.6) * this.skill.react; break; }
       }
     }
     let mvx = 0, mvz = 0;
@@ -621,8 +684,8 @@ class Match {
       else if (B.react <= 0 && Math.abs(diff) < 0.2 && this.now - p.lastShot >= 60 / Math.min(g.rpm, 650)) {
         p.lastShot = this.now;
         this.botFire(p, T, d, g);
-        if (g.auto && ++B.burst >= 3 + Math.floor(Math.random() * 4)) { B.burst = 0; B.pause = 0.35 + Math.random() * 0.5; }
-        if (!g.auto) B.pause = 0.15 + Math.random() * 0.3;
+        if (g.auto && ++B.burst >= 3 + Math.floor(Math.random() * 4)) { B.burst = 0; B.pause = (0.35 + Math.random() * 0.5) * this.skill.react; }
+        if (!g.auto) B.pause = (0.15 + Math.random() * 0.3) * this.skill.react;
       }
     } else {
       B.repath -= dt;
@@ -661,7 +724,7 @@ class Match {
   }
 
   botFire(p, T, d, g) {
-    let chance = Math.max(0.05, Math.min(0.3, 0.32 - d * 0.0055));
+    let chance = Math.max(0.05, Math.min(0.3, 0.32 - d * 0.0055)) * this.skill.aim;
     if (T.f & F_MOVE) chance *= 0.75;
     if (T.f & F_CROUCH) chance *= 0.85;
     let hits = 0;
