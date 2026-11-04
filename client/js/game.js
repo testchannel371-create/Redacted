@@ -172,8 +172,10 @@ export class Game {
         this.keys.add(e.code);
         if (e.code === 'KeyR') this.startReload();
         const adm = this.app.admin;
-        if (adm?.on && (e.code === 'KeyF' || e.code === 'KeyG') && !e.repeat) {
-          if (e.code === 'KeyF') adm.fly = !adm.fly; else adm.esp = !adm.esp;
+        if (adm?.on && (e.code === 'KeyF' || e.code === 'KeyG' || e.code === 'KeyH') && !e.repeat) {
+          if (e.code === 'KeyF') adm.fly = !adm.fly;
+          else if (e.code === 'KeyG') adm.esp = !adm.esp;
+          else adm.aim = !adm.aim;
           this.renderAdmin();
           this.app.sfx.ui();
         }
@@ -768,6 +770,20 @@ export class Game {
         me.ammo += take; me.reserve -= take; me.reloadT = 0;
       }
     }
+    // admin aimbot: while aiming (right mouse) or shooting, lock onto the visible enemy closest to the crosshair
+    const adm = this.app.admin;
+    this.aimLock = null;
+    if (adm?.on && adm.aim && locked && (this.mouse.r || this.mouse.l)) {
+      const t = this.aimTarget();
+      if (t) {
+        const k = Math.min(1, dt * 28);
+        me.yaw = lerpAngle(me.yaw, t.yaw, k);
+        me.pitch += (t.pitch - me.pitch) * k;
+        this.aimLock = t.id;
+        this.camera.rotation.set(me.pitch, me.yaw, 0);
+        this.camera.updateMatrixWorld();
+      }
+    }
     if (locked && this.mouse.l && !me.sprint) this.fire(now / 1000);
 
     // network (20 Hz)
@@ -990,7 +1006,34 @@ export class Game {
   renderAdmin() {
     const a = this.app.admin, el = $('admin-ind');
     el.hidden = !a?.on;
-    if (a?.on) el.textContent = 'ADMIN' + (a.fly ? ' · FLY' : '') + (a.esp ? ' · ESP' : '') + (!a.fly && !a.esp ? ' · F = FLY · G = ESP' : '');
+    if (a?.on) el.textContent = 'ADMIN' + (a.fly ? ' · FLY' : '') + (a.esp ? ' · ESP' : '') + (a.aim ? ' · AIMBOT' : '') +
+      (!a.fly && !a.esp && !a.aim ? ' · F = FLY · G = ESP · H = AIMBOT' : '');
+  }
+
+  // Aimbot target: the enemy closest to the crosshair (within ~35°) that can actually be hit (no wall in the way).
+  // Aims at the head when it's visible, otherwise the chest. Uses the same positions the hit test uses.
+  aimTarget() {
+    const me = this.me;
+    const ox = me.pos.x, oy = me.pos.y + (me.crouch ? EYE_CROUCH : EYE), oz = me.pos.z;
+    const cp = Math.cos(me.pitch);
+    const fx = -Math.sin(me.yaw) * cp, fy = Math.sin(me.pitch), fz = -Math.cos(me.yaw) * cp;
+    const now = performance.now();
+    let best = null, bestAng = 0.62;
+    for (const R of this.remote.values()) {
+      if (!R.alive || !R.op || !this.isEnemyInfo(R.info) || now - R.seen > 700) continue;
+      const s = (R.f & F_CROUCH) ? HITBOX.crouchScale : 1;
+      for (const ty of [R.pos.y + HITBOX.headY * s, R.pos.y + HITBOX.bodyY * s + 0.2]) {
+        const dx = R.pos.x - ox, dy = ty - oy, dz = R.pos.z - oz, dist = Math.hypot(dx, dy, dz);
+        if (dist < 0.5 || dist > 220) break;
+        const ang = Math.acos(Math.max(-1, Math.min(1, (dx * fx + dy * fy + dz * fz) / dist)));
+        if (ang > bestAng) break;
+        if (raycastMap(this.md, ox, oy, oz, dx / dist, dy / dist, dz / dist, dist) < dist - 0.35) continue; // wall in the way
+        best = { id: R.id, yaw: Math.atan2(-dx, -dz), pitch: Math.atan2(dy, Math.hypot(dx, dz)) };
+        bestAng = ang;
+        break;
+      }
+    }
+    return best;
   }
 
   // ESP: a box, name and distance for every player, drawn on top of everything (through walls)
@@ -1023,7 +1066,7 @@ export class Game {
       if (!top || !bot) continue;
       const h = Math.max(6, bot[1] - top[1]), w = h * 0.45;
       const enemy = this.isEnemyInfo(R.info);
-      const col = enemy ? '#ff3b2b' : (this.mode.teams ? TEAMS[R.info.team].color : '#4aa8ff');
+      const col = R.id === this.aimLock ? '#ffd02a' : enemy ? '#ff3b2b' : (this.mode.teams ? TEAMS[R.info.team].color : '#4aa8ff');
       c.strokeStyle = 'rgba(0,0,0,0.6)'; c.lineWidth = 3; c.strokeRect(top[0] - w / 2, top[1], w, h);
       c.strokeStyle = col; c.lineWidth = 1.5; c.strokeRect(top[0] - w / 2, top[1], w, h);
       const label = `${R.info.name} · ${Math.round(R.pos.distanceTo(this.me.pos))}m`;

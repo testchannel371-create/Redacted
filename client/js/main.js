@@ -97,7 +97,17 @@ async function boot() {
 async function connect() {
   setStatus('CONNECTING…', '');
   const online = await net.connect(A.gunData);
-  if (!online) setStatus('OFFLINE · PRACTICE VS BOTS', 'off');
+  if (!online) { setStatus('OFFLINE · PRACTICE VS BOTS', 'off'); keepTrying(); }
+}
+
+// Offline? Keep knocking on the server in the background (a free Render server can take up to a
+// minute to wake up) and switch to online on its own, but never in the middle of a practice match.
+function keepTrying() {
+  net.startReconnect(() => !game.active, () => {
+    party = null; renderParty();
+    if (screen === 'party') net.send({ t: 'party_create' });
+    toast('Connected to the server. You are online now!');
+  });
 }
 
 function setStatus(text, cls) {
@@ -110,7 +120,7 @@ function setStatus(text, cls) {
 let party = null, myId = null, serverInfo = null;
 
 // ------------------------------------------------------------------ admin (password is checked by the server)
-const admin = { on: false, fly: false, esp: false };
+const admin = { on: false, fly: false, esp: false, aim: false };
 let adminPw = null; // kept in memory only for this tab, never saved
 app.admin = admin;
 
@@ -150,7 +160,7 @@ function buildAdmin() {
   $('admin-close').addEventListener('click', close);
   $('admin-dlg').addEventListener('click', (e) => { if (e.target === $('admin-dlg')) close(); });
   $('admin-lock').addEventListener('click', () => {
-    admin.on = admin.fly = admin.esp = false; adminPw = null;
+    admin.on = admin.fly = admin.esp = admin.aim = false; adminPw = null;
     net.send({ t: 'admin_off' });
     renderAdmin(); close(); toast('Admin locked');
   });
@@ -217,11 +227,11 @@ function wireNet() {
     if (m.ok) {
       admin.on = true;
       $('admin-err').textContent = '';
-      if (!adminPw) toast('Admin unlocked: fly (F), ESP (G), unlimited coins');
+      if (!adminPw) toast('Admin unlocked: fly (F), ESP (G), aimbot (H), unlimited coins');
       adminPw = adminPw || $('admin-pw').value;
       $('admin-pw').value = '';
     } else {
-      admin.on = false; admin.fly = false; admin.esp = false; adminPw = null;
+      admin.on = admin.fly = admin.esp = admin.aim = false; adminPw = null;
       $('admin-err').textContent = m.msg || 'Wrong password';
     }
     renderAdmin();
@@ -235,6 +245,7 @@ function wireNet() {
     toast(full ? `The server is full (${full} players). Playing offline practice for now.` : 'Lost connection to the server. Switched to offline practice.');
     setStatus('OFFLINE · PRACTICE VS BOTS', 'off');
     net.goOffline();
+    if (!full) keepTrying();
   });
   net.on('party', (m) => { party = m.party; renderParty(); });
   net.on('party_err', (m) => { $('party-err').textContent = m.msg; toast(m.msg); });

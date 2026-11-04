@@ -50,7 +50,7 @@ export class Net {
       const finish = (v) => { if (!done) { done = true; resolve(v); } };
       let ws;
       try { ws = new WebSocket(url); } catch { return finish(false); }
-      const to = setTimeout(() => { try { ws.close(); } catch {} finish(false); }, 4500);
+      const to = setTimeout(() => { try { ws.close(); } catch {} finish(false); }, 8000);
       ws.onopen = () => { clearTimeout(to); this.ws = ws; finish(true); };
       ws.onerror = () => { clearTimeout(to); finish(false); };
       ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } this.emit(m); };
@@ -76,6 +76,23 @@ export class Net {
         prev = now;
       }, 50);
     }
+  }
+
+  // While offline, keep trying to reach the server (it may still be waking up or restarting after an
+  // update) and switch back online by itself. canSwitch() lets the menu say when switching is safe.
+  startReconnect(canSwitch, onOnline) {
+    if (this.retryTimer || location.protocol === 'file:' || new URLSearchParams(location.search).get('offline') != null) return;
+    this.retryTimer = setInterval(async () => {
+      if (this.ws || this.trying || !canSwitch()) return;
+      this.trying = true;
+      const ok = await this.tryWs(this.serverUrl());
+      this.trying = false;
+      if (!ok) return;
+      clearInterval(this.retryTimer); this.retryTimer = null;
+      this.online = true;
+      clearInterval(this.timer); this.timer = null; this.local = null; this.client = null; // stop offline practice
+      onOnline?.();
+    }, 10000);
   }
 
   deliver(o) {
