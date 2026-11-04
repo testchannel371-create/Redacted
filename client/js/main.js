@@ -185,7 +185,7 @@ function updateModeNote() {
     ? `Matches hold up to ${serverInfo ? serverInfo.perMatch : 64} players (server max ${serverInfo ? serverInfo.max : 200}).`
     : 'No server found, so this is offline practice. Run the server ("npm start") to play with friends.';
   const map = `The first map is ${b.map >= 0 ? MAPS[b.map].name : 'random'}, then everyone votes for the next one after each round.`;
-  $('mode-note').textContent = `${bots} ${where} ${map} Change bots and the map in PARTY.`;
+  $('mode-note').textContent = `${bots} ${where} ${map} Change how many bots in PARTY.`;
 }
 
 function renderBots() {
@@ -197,7 +197,7 @@ function renderBots() {
   tg.querySelector('.bt-lbl').textContent = b.on ? 'ON' : 'OFF';
   tg.disabled = !lead;
   $('bots-count-row').classList.toggle('off', !b.on || !lead);
-  $('bots-aim-row').classList.toggle('off', !b.on || !lead);
+  document.querySelectorAll('.bots-aim-row').forEach(r => r.classList.toggle('off', !b.on || !lead));
   document.querySelectorAll('[data-skill]').forEach(c => c.classList.toggle('active', c.dataset.skill === b.skill));
   document.querySelectorAll('[data-map]').forEach(c => { c.classList.toggle('active', Number(c.dataset.map) === b.map); c.disabled = !lead; });
   if (document.activeElement !== $('bots-num')) $('bots-num').value = b.count;
@@ -370,15 +370,17 @@ function buildMenu() {
   setInterval(() => { if (screen === 'party' && net.online) net.send({ t: 'parties' }); }, 3000);
   // [BOTS] option
   $('bots-toggle').addEventListener('click', () => { sfx.init(); sfx.ui(); setBots({ on: !profile.bots.on }); });
-  $('bots-aim-row').addEventListener('click', (e) => {
+  // bot aim and first map: the same choices on the PARTY and PLAY screens (leader only)
+  document.querySelectorAll('.bots-aim-row').forEach(row => row.addEventListener('click', (e) => {
     const b = e.target.closest('[data-skill]'); if (!b) return;
-    sfx.ui(); setBots({ skill: b.dataset.skill });
-  });
-  // map picker (leader only): RANDOM or one fixed map
-  $('party-maps').innerHTML = [{ id: -1, name: 'RANDOM' }, ...MAPS].map(m => `<button class="chip" data-map="${m.id}">${m.name}</button>`).join('');
-  $('party-maps').addEventListener('click', (e) => {
-    const b = e.target.closest('[data-map]'); if (!b) return;
-    sfx.ui(); setBots({ map: Number(b.dataset.map) });
+    sfx.init(); sfx.ui(); setBots({ skill: b.dataset.skill });
+  }));
+  document.querySelectorAll('.party-maps').forEach(row => {
+    row.innerHTML = [{ id: -1, name: 'RANDOM' }, ...MAPS].map(m => `<button class="chip" data-map="${m.id}">${m.name}</button>`).join('');
+    row.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-map]'); if (!b) return;
+      sfx.init(); sfx.ui(); setBots({ map: Number(b.dataset.map) });
+    });
   });
   $('bots-range').addEventListener('input', (e) => setBots({ count: Number(e.target.value) }));
   const num = $('bots-num');
