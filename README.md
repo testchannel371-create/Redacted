@@ -2,15 +2,15 @@
 
 A browser first-person shooter with a Cold War / Black Ops look. It's 3D, runs on school Chromebooks, and needs no account. Made by Divan.
 
-- **Modes:** Free for all, Two teams, Four teams. Each new round picks a random map out of 5:
+- **Modes:** Free for all, Two teams, Four teams. After each round, players vote for the next map from 3 choices (most votes wins; a tie or no votes is settled at random). There are 5 maps:
   - **CITADEL**: a rainy coastal fortress with a keep, a radio mast, a naval gun, a helipad and climbable ramparts.
   - **POLARIS**: an arctic research station in a blizzard, with red/navy modules and a catwalk bridge between them.
   - **GRACHT**: a canal city with bridges (including a red steel arch bridge), townhouses, a tram and a clock tower.
   - **KOMBINAT**: a Soviet factory with a brick hall, a gantry crane, slogan-covered garages, a railway and a chimney.
   - **BORGO**: an Italian hill village with a fountain piazza, a bell tower, an arcade cantina and a raised terrace.
 - **Players:** up to 200 on one server, and up to 64 real players in one match.
-- **Party:** you get a 5-digit code. When the party leader presses PLAY, everyone in the party joins the same match and team.
-- **[BOTS] option** (in PARTY, set by the party leader): **✓ ON** gives your party its own match with 1–200 bots. **✗ OFF** matches you with real players only. Bots don't count toward coin rewards.
+- **Party:** you get a 5-digit code, and the OPEN PARTIES list on the PARTY screen shows every party that still has room, with a JOIN button. The leader can pick the first map in START MATCH. PARTY CHAT lets everyone in the party talk; messages aren't saved anywhere. When the party leader presses PLAY, everyone in the party joins the same match and team.
+- **[BOTS] option** (in PARTY, set by the party leader): **✓ ON** gives your party its own match with 1–200 bots, and BOT AIM sets how well they shoot (EASY, NORMAL or HARD). **✗ OFF** matches you with real players only. Bots don't count toward coin rewards.
 - **Weapons:** 50 guns made in Blender. The first 10 are free. The others are bought with coins.
 - **Coins:** winning gives 50 coins. Above 10 real players the reward goes up by 50 for every extra 5 players (11–15 players = 100, 16–20 = 150, and so on). Coins and unlocked guns are saved in your browser.
 - **Operator:** you can change the soldier's skin tone, headgear, face gear, torso, backpack, extras and 4 clothing colours.
@@ -22,6 +22,7 @@ The **ADMIN** button in the top-left of the menu asks for the admin password. On
 - **Fly**: press **F** in a match. SPACE goes up, C goes down, SHIFT goes fast. There's no gravity and you pass through walls.
 - **ESP**: press **G**. Every player gets a box with their name and distance, visible through walls.
 - **AIMBOT**: press **H**. While you hold right click or shoot, your aim snaps to the nearest visible enemy near your crosshair (head first, chest if the head is hidden). ESP shows the locked target in yellow.
+- **GODMODE**: press **J**. You take no damage, so you can't be killed. The server enforces this, and only for unlocked admins.
 - **Unlimited coins**: coins show ∞ and every gun in the shop is free.
 
 Admin lasts until you close the tab. The password is checked on the server and is never sent to players' browsers. Each address gets 15 tries per 10 minutes.
