@@ -292,6 +292,7 @@ body.ingame #grain { background: radial-gradient(ellipse at center, transparent 
 #ammo-mag.low { color: var(--red); }
 .ammo-sep { font-size: 34px; color: var(--dim); }
 #ammo-res { font-size: 34px; color: var(--dim); }
+.ammo.inf .ammo-sep, .ammo.inf #ammo-res { display: none; }
 #hud-gunname { font-size: 22px; letter-spacing: 2px; color: var(--accent); }
 #reload-hint { font-size: 20px; letter-spacing: 2px; color: var(--accent2); min-height: 22px; }
 
