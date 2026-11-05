@@ -461,6 +461,7 @@ export class Game {
     const kd = (id) => { if (!this.kd.has(id)) this.kd.set(id, { k: 0, d: 0 }); return this.kd.get(id); };
     if (m.k !== m.v) kd(m.k).k++;
     kd(m.v).d++;
+    if (m.k === this.myId && m.c) this.app.onCoins(m.c);
     const K = this.players.get(m.k), V = this.players.get(m.v);
     const col = (p) => (p && this.mode.teams ? TEAMS[p.team].color : (p && p.id === this.myId ? '#f5a524' : '#ebe6da'));
     const row = document.createElement('div');
@@ -474,7 +475,7 @@ export class Game {
     if (m.v === this.myId) this.die(K);
     else if (m.k === this.myId) {
       const pop = $('kill-pop');
-      pop.innerHTML = `<div class="pop">${m.h ? 'HEADSHOT · ' : ''}ELIMINATED ${esc(V?.name)} <span style="color:#fff">+100</span></div>`;
+      pop.innerHTML = `<div class="pop">${m.h ? 'HEADSHOT · ' : ''}ELIMINATED ${esc(V?.name)}${m.c ? ` <span style="color:#fff">+${m.c} COINS</span>` : ''}</div>`;
     }
     this.renderScores();
   }

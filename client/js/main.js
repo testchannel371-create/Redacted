@@ -5,7 +5,7 @@ import { Net } from './net.js';
 import { Sfx } from './audio.js';
 import { Game } from './game.js';
 import { MenuScene } from './menu3d.js';
-import { DEFAULT_SKIN, cleanSkin, SKIN_OPTIONS, cleanBots, MAX_BOTS } from '../shared/core.js';
+import { DEFAULT_SKIN, cleanSkin, SKIN_OPTIONS, cleanBots, MAX_BOTS, BOT_SKILL } from '../shared/core.js';
 import { MAPS } from '../shared/maps.js';
 
 const $ = (id) => document.getElementById(id);
@@ -178,9 +178,11 @@ function buildAdmin() {
 const amLeader = () => !party || party.leader === myId;
 const activeBots = () => (amLeader() || !party.bots ? profile.bots : party.bots);
 
+const botPay = (b) => (BOT_SKILL[b.skill].coins ? `Each bot kill pays ${BOT_SKILL[b.skill].coins} coins.` : 'Easy bots pay no coins.');
+
 function updateModeNote() {
   const b = activeBots();
-  const bots = b.on ? `BOTS ON: your party gets its own match with ${b.count} bot${b.count === 1 ? '' : 's'}.` : 'BOTS OFF: you are matched with real players only.';
+  const bots = b.on ? `BOTS ON: your party gets its own match with ${b.count} bot${b.count === 1 ? '' : 's'}. ${botPay(b)}` : 'BOTS OFF: you are matched with real players only.';
   const where = net.online
     ? `Matches hold up to ${serverInfo ? serverInfo.perMatch : 64} players (server max ${serverInfo ? serverInfo.max : 200}).`
     : 'No server found, so this is offline practice. Run the server ("npm start") to play with friends.';
@@ -205,7 +207,7 @@ function renderBots() {
   $('bots-range').disabled = $('bots-num').disabled = !lead;
   $('bots-hint').textContent = !lead
     ? `Only the party leader can change bots. Leader has bots ${b.on ? 'ON (' + b.count + ')' : 'OFF'}.`
-    : b.on ? `Your party gets its own match with ${b.count} bot${b.count === 1 ? '' : 's'}. Bots don't count toward coin rewards.`
+    : b.on ? `Your party gets its own match with ${b.count} bot${b.count === 1 ? '' : 's'}. ${botPay(b)}`
       : 'Bots off: you will be matched with real players only.';
   updateModeNote();
 }
@@ -534,7 +536,7 @@ function renderDetail() {
     ${bar('MOBILITY', (g.move - 0.8) / 0.3, '')}
     ${bar('MAGAZINE', Math.log(g.mag) / Math.log(150), g.mag)}
     <div class="gd-actions">${action}</div>
-    <div class="gd-note" id="gd-note">${!owned && !canAfford(g.price) ? `You need ${(g.price - profile.coins).toLocaleString()} more coins. Win matches to earn coins.` : ''}</div>`;
+    <div class="gd-note" id="gd-note">${!owned && !canAfford(g.price) ? `You need ${(g.price - profile.coins).toLocaleString()} more coins. Get kills and win matches to earn coins.` : ''}</div>`;
   const eq = $('gd-equip');
   if (eq) eq.onclick = () => { sfx.uiConfirm(); equip(g.id); };
   const buy = $('gd-buy');
