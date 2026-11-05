@@ -49,8 +49,10 @@ export function cleanSkin(s) {
 export const SKIN_OPTIONS = SKIN_ENUMS;
 
 export const MAX_BOTS = 200;
-// aim scales the chance a bot's shot lands; react scales how long it takes to start and resume shooting
-export const BOT_SKILL = { easy: { aim: 0.18, react: 2.2 }, normal: { aim: 0.55, react: 1.4 }, hard: { aim: 1, react: 1 } };
+// aim scales the chance a bot's shot lands; react scales how long it takes to start and resume shooting;
+// coins is what a real player earns for killing that bot
+export const BOT_SKILL = { easy: { aim: 0.18, react: 2.2, coins: 0 }, normal: { aim: 0.55, react: 1.4, coins: 5 }, hard: { aim: 1, react: 1, coins: 5 } };
+const PLAYER_KILL_COINS = 25;
 // The leader's match settings: bots, bot aim and the map (-1 = random).
 export function cleanBots(b) {
   const count = b && b.count != null ? Math.round(Number(b.count)) : NaN;
@@ -551,7 +553,8 @@ class Match {
       a.kills++;
       if (this.scores) this.scores[a.team]++;
     }
-    this.sendAll({ t: 'kill', k: a.id, v: t.id, g: a.gun, h: head ? 1 : 0 });
+    const coins = a.client && a !== t ? (t.client ? PLAYER_KILL_COINS : this.skill.coins) : 0;
+    this.sendAll({ t: 'kill', k: a.id, v: t.id, g: a.gun, h: head ? 1 : 0, c: coins });
     if (this.mode.teams) { if (this.scores[a.team] >= this.mode.limit) this.end({ team: a.team }); }
     else if (a.kills >= this.mode.limit) this.end({ id: a.id });
   }
