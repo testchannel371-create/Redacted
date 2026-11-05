@@ -10,9 +10,9 @@ A browser first-person shooter with a Cold War / Black Ops look. It's 3D, runs o
   - **BORGO**: an Italian hill village with a fountain piazza, a bell tower, an arcade cantina and a raised terrace.
 - **Players:** up to 200 on one server, and up to 64 real players in one match.
 - **Party:** you get a 5-digit code, and the OPEN PARTIES list on the PARTY screen shows every party that still has room, with a JOIN button. The leader can pick the first map in START MATCH, and solo players can pick it and BOT AIM on the PLAY screen. PARTY CHAT lets everyone in the party talk; messages aren't saved anywhere. When the party leader presses PLAY, everyone in the party joins the same match and team.
-- **[BOTS] option** (in PARTY, set by the party leader): **✓ ON** gives your party its own match with 1–200 bots, and BOT AIM sets how well they shoot (EASY, NORMAL or HARD). **✗ OFF** matches you with real players only. Bots don't count toward coin rewards.
+- **[BOTS] option** (in PARTY, set by the party leader): **✓ ON** gives your party its own match with 1–200 bots, and BOT AIM sets how well they shoot (EASY, NORMAL or HARD). **✗ OFF** matches you with real players only. Bots don't count toward the win reward.
 - **Weapons:** 50 guns made in Blender. The first 10 are free. The others are bought with coins.
-- **Coins:** winning gives 50 coins. Above 10 real players the reward goes up by 50 for every extra 5 players (11–15 players = 100, 16–20 = 150, and so on). Coins and unlocked guns are saved in your browser.
+- **Coins:** winning gives 50 coins. Above 10 real players the reward goes up by 50 for every extra 5 players (11–15 players = 100, 16–20 = 150, and so on). Each kill also pays: 25 coins for a real player, 5 for a NORMAL or HARD bot, nothing for an EASY bot. Coins and unlocked guns are saved in your browser.
 - **Operator:** you can change the soldier's skin tone, headgear, face gear, torso, backpack, extras and 4 clothing colours.
 
 ## Admin
