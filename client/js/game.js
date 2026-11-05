@@ -612,17 +612,21 @@ export class Game {
   }
 
   // ------------------------------------------------------------------ weapons
+  // Unlocked admins always have unlimited ammo: shots cost nothing and they never reload.
+  get infAmmo() { return !!this.app.admin?.on; }
+
   startReload() {
     const me = this.me, g = this.g;
-    if (!me.alive || me.reloadT > 0 || me.ammo >= g.mag || me.reserve <= 0) return;
+    if (this.infAmmo || !me.alive || me.reloadT > 0 || me.ammo >= g.mag || me.reserve <= 0) return;
     me.reloadT = g.reload;
     this.app.sfx.reload();
   }
 
   fire(now) {
     const me = this.me, g = this.g;
+    const inf = this.infAmmo;
     if (now - me.lastShot < 60 / g.rpm || me.reloadT > 0) return;
-    if (me.ammo <= 0) {
+    if (me.ammo <= 0 && !inf) {
       if (this.mouse.fresh) { this.app.sfx.dry(); this.startReload(); }
       this.mouse.fresh = false;
       return;
@@ -630,7 +634,7 @@ export class Game {
     if (!g.auto && !this.mouse.fresh) return;
     this.mouse.fresh = false;
     me.lastShot = now;
-    me.ammo--;
+    if (!inf) me.ammo--;
     me.sprintLock = 0.25;
 
     const cam = this.camera;
@@ -797,7 +801,7 @@ export class Game {
     me.bloom *= Math.exp(-dt * 6);
     if (me.reloadT > 0) {
       me.reloadT -= dt;
-      if (me.reloadT <= 0) {
+      if (me.reloadT <= 0 || this.infAmmo) { // unlocking admin mid-reload finishes it at once
         const take = Math.min(g.mag - me.ammo, me.reserve);
         me.ammo += take; me.reserve -= take; me.reloadT = 0;
       }
@@ -965,9 +969,10 @@ export class Game {
     const tl = Math.ceil(this.timeLeft);
     const ts = `${Math.floor(tl / 60)}:${String(tl % 60).padStart(2, '0')}`;
     if (this._ts !== ts) { $('hud-timer').textContent = ts; this._ts = ts; }
-    if (this._am !== me.ammo) { const e = $('ammo-mag'); e.textContent = me.ammo; e.classList.toggle('low', me.ammo <= Math.ceil(g.mag * 0.25)); this._am = me.ammo; }
+    const inf = this.infAmmo, am = inf ? '∞' : me.ammo;
+    if (this._am !== am) { const e = $('ammo-mag'); e.textContent = am; e.classList.toggle('low', !inf && me.ammo <= Math.ceil(g.mag * 0.25)); e.parentElement.classList.toggle('inf', inf); this._am = am; }
     if (this._ar !== me.reserve) { $('ammo-res').textContent = me.reserve; this._ar = me.reserve; }
-    const hint = me.reloadT > 0 ? 'RELOADING' : (me.ammo === 0 && me.reserve === 0 ? 'NO AMMO' : (me.ammo <= Math.ceil(g.mag * 0.25) ? 'PRESS R TO RELOAD' : ''));
+    const hint = inf ? '' : me.reloadT > 0 ? 'RELOADING' : (me.ammo === 0 && me.reserve === 0 ? 'NO AMMO' : (me.ammo <= Math.ceil(g.mag * 0.25) ? 'PRESS R TO RELOAD' : ''));
     if (this._rh !== hint) { $('reload-hint').textContent = hint; this._rh = hint; }
     const hp = Math.max(0, Math.round(me.hp));
     if (this._hp !== hp) { const e = $('hp-fill'); e.style.width = hp + '%'; e.classList.toggle('low', hp < 35); this._hp = hp; }
