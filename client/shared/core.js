@@ -36,6 +36,7 @@ const SKIN_ENUMS = {
 export const DEFAULT_SKIN = {
   skin: '#c68a63', shirt: '#3d4a35', pants: '#3b3f33', gear: '#2b2e26', hat: '#3a3d33',
   head: 'helmet', face: 'none', vest: 'plate', back: 'none', knees: true, gloves: false, rig: true,
+  ghost: false, // KNOCK OFF GHOST: swaps the whole soldier for the skull-mask operator model
 };
 
 export function cleanSkin(s) {
@@ -43,7 +44,7 @@ export function cleanSkin(s) {
   if (!s || typeof s !== 'object') return o;
   for (const k of ['skin', 'shirt', 'pants', 'gear', 'hat']) if (COLOR.test(s[k])) o[k] = s[k];
   for (const k in SKIN_ENUMS) if (SKIN_ENUMS[k].includes(s[k])) o[k] = s[k];
-  for (const k of ['knees', 'gloves', 'rig']) if (typeof s[k] === 'boolean') o[k] = s[k];
+  for (const k of ['knees', 'gloves', 'rig', 'ghost']) if (typeof s[k] === 'boolean') o[k] = s[k];
   return o;
 }
 export const SKIN_OPTIONS = SKIN_ENUMS;
