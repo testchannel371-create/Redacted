@@ -93,6 +93,46 @@ export class Sfx {
     src.start(t, Math.random(), 0.05);
   }
 
+  // Footstep: a short, dull boot thump. dist in metres (0 = you), pan -1..1.
+  step({ dist = 0, pan = 0, vol = 0.7 } = {}) {
+    if (!this.ctx || this.voices > 26) return;
+    const att = dist > 0 ? 1 / (1 + dist / 4.5) : 0.55;
+    const v = 0.3 * vol * att;
+    if (v < 0.012) return;
+    const t = this.ctx.currentTime, out = this._out(v, pan);
+    this.voices++;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noise;
+    src.playbackRate.value = 0.55 + Math.random() * 0.3;
+    const f = this.ctx.createBiquadFilter();
+    f.type = 'lowpass'; f.frequency.value = 380 + Math.random() * 220; f.Q.value = 1.2;
+    const env = this.ctx.createGain();
+    env.gain.setValueAtTime(1, t);
+    env.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+    src.connect(f).connect(env).connect(out);
+    src.start(t, Math.random() * 0.8, 0.12);
+    src.onended = () => { this.voices--; out.disconnect(); };
+  }
+
+  // Slide: gravelly scrape that fades as the slide slows (dur in seconds).
+  slide(dur = 0.8) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, d = Math.max(0.3, Math.min(1.2, dur));
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noise;
+    src.loop = true;
+    const f = this.ctx.createBiquadFilter();
+    f.type = 'bandpass'; f.Q.value = 0.8;
+    f.frequency.setValueAtTime(1400, t);
+    f.frequency.exponentialRampToValueAtTime(450, t + d);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.001, t);
+    g.gain.exponentialRampToValueAtTime(0.22, t + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.001, t + d);
+    src.connect(f).connect(g).connect(this.master);
+    src.start(t, Math.random() * 0.2, d + 0.05);
+  }
+
   hit(head) { this.tone(head ? 1900 : 1400, 0.05, 'square', 0.08); this.click(0.08); }
   kill() { this.tone(880, 0.08, 'triangle', 0.18); setTimeout(() => this.tone(1320, 0.14, 'triangle', 0.16), 70); }
   hurt() { this.tone(160, 0.2, 'sawtooth', 0.08, 0.5); }

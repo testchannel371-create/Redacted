@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { animateOperator, makeRig } from './anim.js';
 
 export const A = { guns: [], gunData: [], opTemplate: null, vm: {} };
 const CUSTOM = ['skin', 'shirt', 'pants', 'gear', 'hat'];
@@ -105,15 +106,42 @@ export function opMaterial(name, color) {
 }
 
 // ------------------------------------------------------------------ operator (soldier) model
-// For speed every body part (with the clothing attached to it) is merged into ONE vertex-coloured
-// mesh, so a soldier costs ~10 draw calls instead of ~60.
-const BONES = ['pelvis', 'torso', 'head', 'arm_R', 'forearm_R', 'arm_L', 'forearm_L', 'leg_L', 'leg_R'];
+// 13 rigid parts (pelvis, torso, head, upper/lower arms, thigh/shin/foot per leg) driven as bones of ONE
+// GPU-skinned mesh with all the clothing merged in and vertex-coloured: one draw call per soldier
+// (two for the ghost, whose mask has a texture), however many joints the animation bends.
+const BONES = ['pelvis', 'torso', 'head', 'arm_R', 'forearm_R', 'arm_L', 'forearm_L', 'leg_L', 'shin_L', 'foot_L', 'leg_R', 'shin_R', 'foot_R'];
+const BONE_PARENT = { pelvis: null, torso: 'pelvis', head: 'torso', arm_R: 'torso', forearm_R: 'arm_R', arm_L: 'torso', forearm_L: 'arm_L',
+  leg_L: null, shin_L: 'leg_L', foot_L: 'shin_L', leg_R: null, shin_R: 'leg_R', foot_R: 'shin_R' };
 const BASE_COL = { boots: 0x201b16, opdark: 0x131415, hair: 0x1f1812, eye: 0x0c0c0c, lens: 0x3a5562, brass: 0xb58a3a };
 const OP_MAT = new THREE.MeshLambertMaterial({ vertexColors: true });
-let rig = null;
+const SPHERE = new THREE.Sphere(new THREE.Vector3(0, 0.85, 0), 1.4); // culling bound for any pose
+const IDENT = new THREE.Matrix4();
+let tmpl = null;
+
+// Bone rest positions (parent-relative) -> everything the skinning and the IK need.
+function modelFrom(local) {
+  const world = {};
+  for (const b of BONES) world[b] = local[b].clone().add(BONE_PARENT[b] ? world[BONE_PARENT[b]] : new THREE.Vector3());
+  return { local, world, rig: makeRig(world), inverses: BONES.map(b => new THREE.Matrix4().makeTranslation(-world[b].x, -world[b].y, -world[b].z)) };
+}
+let soldier = null;
+function soldierModel() {
+  if (soldier) return soldier;
+  const { nodes } = analyseRig();
+  return (soldier = modelFrom(Object.fromEntries(BONES.map(b => [b, nodes[b].obj.position.clone()]))));
+}
+// every vertex follows exactly one bone
+function skinned(geo, bone) {
+  const n = geo.attributes.position.count, bi = BONES.indexOf(bone);
+  const si = new Uint8Array(n * 4), sw = new Uint8Array(n * 4);
+  for (let i = 0; i < n; i++) { si[i * 4] = bi; sw[i * 4] = 255; }
+  geo.setAttribute('skinIndex', new THREE.Uint8BufferAttribute(si, 4));
+  geo.setAttribute('skinWeight', new THREE.Uint8BufferAttribute(sw, 4, true));
+  return geo;
+}
 
 function analyseRig() {
-  if (rig) return rig;
+  if (tmpl) return tmpl;
   const nodes = {};
   A.opTemplate.updateMatrixWorld(true);
   A.opTemplate.traverse(o => {
@@ -126,7 +154,7 @@ function analyseRig() {
   });
   const acc = Object.fromEntries(BONES.map(b => [b, []]));
   for (const n in nodes) if (!BONES.includes(n) && acc[nodes[n].parent]) acc[nodes[n].parent].push(n);
-  return (rig = { nodes, acc });
+  return (tmpl = { nodes, acc });
 }
 
 export function partVisible(name, skin) {
@@ -171,19 +199,26 @@ function boneGeometry(bone, skin) {
   return merged;
 }
 
+// The normal soldier's skinned geometry for one set of clothing choices (rest pose, root space).
+function soldierGeometry(skin) {
+  const M = soldierModel(), parts = [];
+  for (const b of BONES) {
+    const g = boneGeometry(b, skin);
+    g.translate(M.world[b].x, M.world[b].y, M.world[b].z);
+    parts.push(skinned(g, b));
+  }
+  const merged = mergeGeometries(parts, false);
+  parts.forEach(p => p.dispose());
+  return merged;
+}
+
 export function makeOperator(skin) {
-  const { nodes } = analyseRig();
   const root = new THREE.Group();
   const P = {};
-  for (const b of BONES) {
-    const o = new THREE.Object3D();
-    const t = nodes[b].obj;
-    o.position.copy(t.position); o.quaternion.copy(t.quaternion);
-    o.userData.rest = o.position.clone();
-    P[b] = o;
-  }
-  for (const b of BONES) (P[nodes[b].parent] || root).add(P[b]);
-  const op = { root, P, meshes: {}, gun: null, gunIndex: -1, skin: null, walk: 0, deadT: 0 };
+  for (const b of BONES) { P[b] = new THREE.Bone(); P[b].name = b; }
+  for (const b of BONES) (BONE_PARENT[b] ? P[BONE_PARENT[b]] : root).add(P[b]);
+  P.pelvis.rotation.order = 'YXZ';
+  const op = { root, P, meshes: [], skeleton: null, rig: null, anim: null, gun: null, gunIndex: -1, skin: null, deadT: 0 };
   setOperatorSkin(op, skin);
   // simple blob shadow
   const sh = new THREE.Mesh(blobGeo(), blobMat());
@@ -209,8 +244,8 @@ function blobMat() {
 }
 
 // ------------------------------------------------------------------ KNOCK OFF GHOST operator
-// A separate, ready-made model (blender/make_ghost.py) cut into the same 9 parts, so the same animation
-// drives it. Its parts are shared by every ghost on screen, and the file only downloads once someone
+// A separate, ready-made model (blender/make_ghost.py) cut into the same 13 parts, so the same animation
+// drives it. Its geometry is shared by every ghost on screen, and the file only downloads once someone
 // in view (or the player) picks it. Until it arrives the normal soldier stands in.
 // Colours for the first-person arms when playing as the ghost: navy sleeves, black gloves.
 export const GHOST_VM = { skin: '#252528', shirt: '#2c2f3b', gear: '#252528', gloves: true };
@@ -219,48 +254,61 @@ export function loadGhost() {
   if (!ghostLoad) {
     ghostLoad = loadGlb('assets/ghost.glb').then((g) => {
       const root = g.scene.getObjectByName('ghost_root');
-      const parts = {};
+      const local = {}, body = [], face = [];
       root.traverse((o) => {
         const name = o.userData.name;
         if (!BONES.includes(name)) return;
-        const meshes = [];
-        const add = (m, matrix) => meshes.push({ geo: m.geometry, mat: m.material.map ? ghostFaceMat(m.material.map) : OP_MAT, matrix });
-        if (o.isMesh) add(o, new THREE.Matrix4());
-        for (const c of o.children) if (c.isMesh && !c.userData.name) add(c, c.matrix.clone());
-        parts[name] = { pos: o.position.clone(), quat: o.quaternion.clone(), meshes };
+        local[name] = o.position.clone();
+        const take = (m, matrix) => { const geo = m.geometry.clone().applyMatrix4(matrix); (m.material.map ? face : body).push({ geo, bone: name, map: m.material.map }); };
+        if (o.isMesh) take(o, IDENT);
+        for (const c of o.children) if (c.isMesh && !c.userData.name) take(c, c.matrix);
       });
-      if (BONES.some(b => !parts[b])) throw new Error('ghost.glb is missing parts');
-      A.ghost = parts;
-      return parts;
+      if (BONES.some(b => !local[b])) throw new Error('ghost.glb is missing parts');
+      const M = modelFrom(local);
+      const build = (list, keep) => {
+        const geos = list.map(({ geo, bone }) => {
+          for (const k of Object.keys(geo.attributes)) if (!keep.includes(k)) geo.deleteAttribute(k);
+          geo.translate(M.world[bone].x, M.world[bone].y, M.world[bone].z);
+          return skinned(geo, bone);
+        });
+        const merged = mergeGeometries(geos, false);
+        geos.forEach(x => x.dispose());
+        return merged;
+      };
+      M.bodyGeo = build(body, ['position', 'normal', 'color']);
+      M.faceGeo = face.length ? build(face, ['position', 'normal', 'uv']) : null;
+      M.faceMat = face.length ? new THREE.MeshLambertMaterial({ map: face[0].map }) : null;
+      A.ghost = M;
+      return M;
     }).catch((e) => { ghostLoad = null; throw e; });
   }
   return ghostLoad;
 }
-let _faceMat;
-const ghostFaceMat = (map) => _faceMat || (_faceMat = new THREE.MeshLambertMaterial({ map }));
 
 export function setOperatorSkin(op, skin) {
   op.skin = skin;
   if (skin.ghost && !A.ghost) loadGhost().then(() => { if (op.skin === skin) setOperatorSkin(op, skin); }, () => {});
-  const ghost = skin.ghost && A.ghost;
-  const { nodes } = analyseRig();
+  const ghost = !!(skin.ghost && A.ghost);
+  const M = ghost ? A.ghost : soldierModel();
+  op.rig = M.rig; // each model has its own joint positions and limb lengths
   for (const b of BONES) {
-    const P = op.P[b];
-    // each model has its own joint positions
-    const src = ghost ? A.ghost[b] : { pos: nodes[b].obj.position, quat: nodes[b].obj.quaternion };
-    P.position.copy(src.pos); P.quaternion.copy(src.quat);
-    P.userData.rest = P.position.clone();
-    const old = op.meshes[b];
-    if (old) { P.remove(old); if (!old.userData.shared) old.geometry.dispose(); }
-    let m;
-    if (ghost) {
-      m = new THREE.Group();
-      m.userData.shared = true; // the ghost's geometry belongs to every ghost: never dispose it
-      for (const g of A.ghost[b].meshes) { const mm = new THREE.Mesh(g.geo, g.mat); mm.applyMatrix4(g.matrix); m.add(mm); }
-    } else m = new THREE.Mesh(boneGeometry(b, skin), OP_MAT);
-    P.add(m);
-    op.meshes[b] = m;
+    const B = op.P[b];
+    B.position.copy(M.local[b]); B.quaternion.identity();
+    B.userData.rest = B.position.clone();
   }
+  for (const m of op.meshes) { op.root.remove(m); if (!m.userData.shared) m.geometry.dispose(); }
+  if (op.skeleton) op.skeleton.dispose();
+  const skeleton = op.skeleton = new THREE.Skeleton(BONES.map(b => op.P[b]), M.inverses);
+  const add = (geo, mat, shared) => {
+    const m = new THREE.SkinnedMesh(geo, mat);
+    m.bind(skeleton, IDENT);
+    m.boundingSphere = SPHERE;
+    m.userData.shared = shared; // the ghost's geometry belongs to every ghost: never dispose it
+    op.root.add(m);
+    return m;
+  };
+  op.meshes = ghost ? [add(M.bodyGeo, OP_MAT, true)].concat(M.faceGeo ? [add(M.faceGeo, M.faceMat, true)] : [])
+    : [add(soldierGeometry(skin), OP_MAT, false)];
 }
 
 // third-person guns: one merged, vertex-coloured mesh per weapon, shared by every soldier
@@ -300,46 +348,6 @@ export function setOperatorGun(op, i) {
   else loadGun(i).then(attach, () => {});
 }
 
-// Procedural animation. s = { moving, speed (0..1+), crouch, pitch, sprint, dead, dt }
-export function animateOperator(op, s) {
-  const P = op.P;
-  if (s.dead) {
-    op.deadT = Math.min(1, op.deadT + s.dt * 2.2);
-    const e = 1 - (1 - op.deadT) ** 3;
-    op.root.rotation.x = -e * Math.PI / 2;
-    op.root.position.y += e * 0.15;
-    return;
-  }
-  op.deadT = 0;
-  op.root.rotation.x = 0;
-  const sp = s.moving ? (s.sprint ? 1.6 : 1) : 0;
-  op.walk += s.dt * (s.moving ? (s.sprint ? 13 : 9) : 0);
-  const sw = Math.sin(op.walk) * 0.55 * Math.min(1, sp);
-  const crouch = s.crouch ? 1 : 0;
-  P.leg_L.rotation.x = sw + crouch * 1.15;
-  P.leg_R.rotation.x = -sw + crouch * 0.25;
-  P.pelvis.position.y = P.pelvis.userData.rest.y - crouch * 0.42 + Math.abs(Math.cos(op.walk)) * 0.04 * Math.min(1, sp);
-  const pitch = Math.max(-1.1, Math.min(1.1, s.pitch || 0));
-  P.torso.rotation.x = pitch * 0.55 + crouch * -0.15 + (s.sprint ? -0.18 : 0);
-  P.head.rotation.x = pitch * 0.4;
-  if (s.sprint && !op.pistol) {
-    P.arm_R.rotation.set(0.35 + sw * 0.3, 0, -0.1);
-    P.forearm_R.rotation.set(1.1, 0, 0);
-    P.arm_L.rotation.set(0.9, 0, 0.45);
-    P.forearm_L.rotation.set(0.9, 0, 0);
-    if (op.gun) op.gun.rotation.set(-0.5, 0.7, 0);
-  } else if (op.pistol) {
-    P.arm_R.rotation.set(1.42, 0, -0.22);
-    P.forearm_R.rotation.set(0.05, 0, 0);
-    P.arm_L.rotation.set(1.42, 0, 0.5);
-    P.forearm_L.rotation.set(0.05, 0, 0);
-    if (op.gun) op.gun.rotation.set(0, 0, 0);
-  } else {
-    P.arm_R.rotation.set(0.55, 0, -0.12);
-    P.forearm_R.rotation.set(0.75, 0, 0);
-    P.arm_L.rotation.set(1.32, 0, 0.32);
-    P.forearm_L.rotation.set(0, 0, 0);
-    if (op.gun) op.gun.rotation.set(0, 0, 0);
-  }
-}
+// The animation itself (gait, IK, crouch, slide...) lives in anim.js.
+export { animateOperator };
 

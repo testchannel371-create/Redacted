@@ -1,12 +1,36 @@
 // In-match client: movement + collision, shooting + hit detection, viewmodel, remote players, HUD, minimap.
 import * as THREE from 'three';
 import { MAPS, mapData, raycastMap, rayBox, HITBOX } from '../shared/maps.js';
-import { MODES, TEAMS, EYE, EYE_CROUCH, F_ALIVE, F_CROUCH, F_MOVE, F_SPRINT, F_ADS, F_RELOAD, F_AIR } from '../shared/core.js';
+import { MODES, TEAMS, EYE, EYE_CROUCH, F_ALIVE, F_CROUCH, F_MOVE, F_SPRINT, F_ADS, F_RELOAD, F_AIR, F_SLIDE } from '../shared/core.js';
 import { A, makeOperator, setOperatorSkin, setOperatorGun, animateOperator, cloneGun, opMaterial, loadGun, setGunIcon, GHOST_VM } from './assets.js';
+import { stepLength } from './anim.js';
 import { buildWorld, applyMapLighting, minimapImage } from './world.js';
 
 const $ = (id) => document.getElementById(id);
 const HW = 0.35, STAND_H = 1.8, CROUCH_H = 1.25;
+const TAU = Math.PI * 2;
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+
+// Movement tuning, all in one place (m, s, m/s). Speeds are multiplied by the weapon's weight factor.
+export const MOVE = {
+  run: 5.5, sprint: 7.4, crouch: 1.8, ads: 3.4,
+  accel: 13, decel: 9, airAccel: 2.5,        // how fast you reach / lose speed on the ground (1/s), and in the air
+  jump: 7.2, gravity: 22,
+  crouchRate: 12,                             // crouch / stand blend: ~0.25 s
+  slide: {
+    minSpeed: 6.2,                            // must be sprinting at least this fast
+    maxTime: 1.0, endSpeed: 2.6,              // a slide ends after 1 s, or once it has slowed to a crouch walk
+    friction: { default: 0.56, snow: 0.42 },  // per ground surface: deceleration = friction * 9.81
+    steer: 1.3,                               // rad/s of steering while sliding
+    cooldown: 0.6, eye: 0.92,                 // seconds before the next slide; camera height while sliding
+    inRate: 18, outRate: 8,                   // camera drops in ~0.15 s, rises in ~0.35 s
+  },
+};
+export const DEFAULT_KEYS = { forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD', sprint: 'ShiftLeft', crouch: 'KeyC', jump: 'Space', reload: 'KeyR' };
+export const keyName = (c) => ({ ShiftLeft: 'L-SHIFT', ShiftRight: 'R-SHIFT', ControlLeft: 'L-CTRL', ControlRight: 'R-CTRL', AltLeft: 'L-ALT', AltRight: 'R-ALT',
+  Space: 'SPACE', CapsLock: 'CAPS', Backquote: '`', ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', Enter: 'ENTER', Backspace: 'BACKSPACE' })[c]
+  || String(c || '?').replace(/^(Key|Digit|Numpad)/, '').toUpperCase();
+const CAM_MOTION = { full: 1, reduced: 0.4, off: 0 };
 const CUSTOM = ['skin', 'shirt', 'pants', 'gear', 'hat'];
 const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3();
 
@@ -169,9 +193,10 @@ export class Game {
       if (e.code === 'Tab') { e.preventDefault(); this.showBoard(true); }
       if (this.ended && /^Digit[1-9]$/.test(e.code) && !e.repeat) this.castVote(Number(e.code[5]) - 1);
       if (document.pointerLockElement) {
-        if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'ShiftLeft', 'KeyR'].includes(e.code)) e.preventDefault();
+        const B = this.binds();
+        if (e.code === 'Space' || Object.values(B).includes(e.code)) e.preventDefault();
         this.keys.add(e.code);
-        if (e.code === 'KeyR') this.startReload();
+        if (e.code === B.reload) this.startReload();
         const adm = this.app.admin;
         if (adm?.on && ['KeyF', 'KeyG', 'KeyH', 'KeyJ'].includes(e.code) && !e.repeat) {
           if (e.code === 'KeyF') adm.fly = !adm.fly;
@@ -215,6 +240,14 @@ export class Game {
     $('deploy-btn').onclick = () => this.lock();
     $('pause-resume').onclick = () => this.lock();
     $('pause-leave').onclick = () => this.leave();
+  }
+
+  binds() { return this.app.settings.keys || DEFAULT_KEYS; }
+
+  controlsText() {
+    const B = this.binds(), k = (a) => keyName(B[a]);
+    const move = [B.forward, B.left, B.back, B.right].join() === 'KeyW,KeyA,KeyS,KeyD' ? 'WASD' : k('forward') + k('left') + k('back') + k('right');
+    return `${move} move · ${k('jump')} jump · ${k('sprint')} sprint · ${k('crouch')} crouch · ${k('crouch')} while sprinting: slide · MOUSE aim & shoot · RIGHT CLICK aim down sights · ${k('reload')} reload · TAB scores · ESC pause (keys can be changed there)`;
   }
 
   lock() {
@@ -271,6 +304,7 @@ export class Game {
     $('deploy-map').textContent = MAPS[m.map].name;
     $('deploy-sub').textContent = MAPS[m.map].sub + ' · ' + this.mode.name + ' · ROUND ' + m.round;
     this.renderScores();
+    document.querySelector('#deploy .controls-help').textContent = this.controlsText();
     if (!document.pointerLockElement) { $('deploy').hidden = false; $('pause').hidden = true; }
     if (this.relock) { this.relock = false; this.lock(); } // back into the action after voting; the deploy button is the fallback
     if (first) this.app.onEnterGame();
@@ -365,6 +399,7 @@ export class Game {
     me.vel.set(0, 0, 0);
     me.yaw = m.yaw; me.pitch = 0;
     me.alive = true; me.hp = 100; me.crouch = false;
+    me.slide = null; me.crouchToggle = false; me.slideT = 0; me.camY = me.camVy = 0; me.eyeH = EYE; me.eyeV = 0;
     me.killer = null;
     this.equip(m.gun);
     document.body.classList.remove('dead');
@@ -739,9 +774,43 @@ export class Game {
     }
   }
 
+  canStand() {
+    const me = this.me;
+    const list = this.md.query(me.pos.x - 1, me.pos.z - 1, me.pos.x + 1, me.pos.z + 1, this._sq || (this._sq = []));
+    return !this.overlaps(me.pos, STAND_H, list);
+  }
+
+  // Top of whatever is under (x, z) and no more than a step above refY: the ground a foot would land on.
+  groundAt(x, z, refY) {
+    const list = this.md.query(x - 0.05, z - 0.05, x + 0.05, z + 0.05, this._gq || (this._gq = []));
+    let best = 0;
+    for (const s of list) if (x >= s.minX && x <= s.maxX && z >= s.minZ && z <= s.maxZ && s.maxY <= refY + 0.6 && s.maxY > best) best = s.maxY;
+    return best;
+  }
+
+  // Slide: keeps the sprint's momentum (never adds speed), slows with ground friction, steers a little.
+  startSlide(t) {
+    const me = this.me, hs = Math.hypot(me.vel.x, me.vel.z);
+    const fr = MOVE.slide.friction;
+    const surface = MAPS[this.mapId]?.ground?.m;
+    me.slide = { t: 0, dx: me.vel.x / hs, dz: me.vel.z / hs, speed: Math.min(hs, MOVE.sprint * this.g.move), decel: (fr[surface] ?? fr.default) * 9.81 };
+    me.crouch = true; me.sprint = false;
+    if (this.app.settings.crouchMode === 'toggle') me.crouchToggle = true;
+    this.app.sfx.slide?.(me.slide.speed / me.slide.decel);
+  }
+
+  endSlide(t) {
+    const me = this.me, B = this.binds(), K = this.keys;
+    me.slide = null;
+    me.slideReady = t + MOVE.slide.cooldown;
+    // still holding sprint + forward: come up running; otherwise crouch / stand as the crouch key says
+    if (K.has(B.sprint) && K.has(B.forward)) me.crouchToggle = false;
+  }
+
   updateMe(dt, now) {
-    const me = this.me, g = this.g, K = this.keys;
-    const locked = !!document.pointerLockElement && !this.ended;
+    const me = this.me, g = this.g, K = this.keys, B = this.binds();
+    const locked = (!!document.pointerLockElement || this.testLock) && !this.ended;
+    const t = now / 1000;
     // look
     const sens = this.app.settings.sens * 0.0022 * (this.camera.fov / this.app.settings.fov);
     me.yaw -= this.mouse.dx * sens;
@@ -750,26 +819,36 @@ export class Game {
     this.mouse.dx = this.mouse.dy = 0;
     if (!me.alive) return;
 
-    const f = locked ? (K.has('KeyW') ? 1 : 0) - (K.has('KeyS') ? 1 : 0) : 0;
-    const s = locked ? (K.has('KeyD') ? 1 : 0) - (K.has('KeyA') ? 1 : 0) : 0;
+    const f = locked ? (K.has(B.forward) ? 1 : 0) - (K.has(B.back) ? 1 : 0) : 0;
+    const s = locked ? (K.has(B.right) ? 1 : 0) - (K.has(B.left) ? 1 : 0) : 0;
     const flying = !!(this.app.admin?.on && this.app.admin.fly);
-    const wantCrouch = locked && K.has('KeyC') && !flying;
-    if (wantCrouch) me.crouch = true;
-    else if (me.crouch) {
-      const list = this.md.query(me.pos.x - 1, me.pos.z - 1, me.pos.x + 1, me.pos.z + 1, []);
-      if (!this.overlaps(me.pos, STAND_H, list)) me.crouch = false;
-    }
+    if (flying && me.slide) me.slide = null;
+    // crouch: HOLD or TOGGLE (pause menu). A fresh press while sprinting fast slides instead.
+    const toggle = this.app.settings.crouchMode === 'toggle';
+    const crouchKey = locked && K.has(B.crouch) && !flying;
+    const crouchPressed = crouchKey && !me.crouchHeld;
+    me.crouchHeld = crouchKey;
+    const sprintKey = locked && K.has(B.sprint);
+    const sprintPressed = sprintKey && !me.sprintHeld;
+    me.sprintHeld = sprintKey;
+    const hs = Math.hypot(me.vel.x, me.vel.z);
+    if (crouchPressed && me.sprint && me.onGround && !me.slide && t >= (me.slideReady || 0) && hs >= MOVE.slide.minSpeed * g.move) this.startSlide(t);
+    else if (crouchPressed && toggle && !me.slide) me.crouchToggle = !me.crouchToggle;
+    if (toggle && me.crouchToggle && sprintPressed && f > 0 && !me.slide) me.crouchToggle = false; // sprint to stand up
+    const wantCrouch = !flying && (toggle ? !!me.crouchToggle : crouchKey);
+    if (me.slide || wantCrouch) me.crouch = true;
+    else if (me.crouch && this.canStand()) me.crouch = false;   // no standing up under something low
     me.sprintLock = Math.max(0, (me.sprintLock || 0) - dt);
     const ads = locked && this.mouse.r && me.reloadT <= 0;
-    me.sprint = !flying && locked && K.has('ShiftLeft') && f > 0 && !ads && !me.crouch && me.sprintLock <= 0 && !this.mouse.l;
-    const speed = (me.sprint ? 7.4 : me.crouch ? 2.9 : ads ? 3.4 : 5.3) * g.move;
+    me.sprint = !flying && !me.slide && sprintKey && f > 0 && !ads && !me.crouch && me.sprintLock <= 0 && !this.mouse.l;
+    const speed = (me.sprint ? MOVE.sprint : me.crouch ? MOVE.crouch : ads ? MOVE.ads : MOVE.run) * g.move;
     const sy = Math.sin(me.yaw), cy = Math.cos(me.yaw);
     if (flying) {
-      // admin fly: no gravity or collisions, move where you look; SPACE up, C down, SHIFT fast
-      const cp = Math.cos(me.pitch), up = locked ? (K.has('Space') ? 1 : 0) - (K.has('KeyC') ? 1 : 0) : 0;
+      // admin fly: no gravity or collisions, move where you look; jump key up, crouch key down, sprint key fast
+      const cp = Math.cos(me.pitch), up = locked ? (K.has(B.jump) ? 1 : 0) - (K.has(B.crouch) ? 1 : 0) : 0;
       let vx = -sy * cp * f + cy * s, vy = Math.sin(me.pitch) * f + up, vz = -cy * cp * f - sy * s;
       const l = Math.hypot(vx, vy, vz);
-      const fs = (locked && K.has('ShiftLeft') ? 34 : 13) / Math.max(1, l);
+      const fs = (sprintKey ? 34 : 13) / Math.max(1, l);
       const lim = this.md.map.half + 38;
       me.pos.x = Math.max(-lim, Math.min(lim, me.pos.x + vx * fs * dt));
       me.pos.y = Math.max(0, Math.min(190, me.pos.y + vy * fs * dt));
@@ -781,12 +860,28 @@ export class Game {
       let wx = -sy * f + cy * s, wz = -cy * f - sy * s;
       const wl = Math.hypot(wx, wz);
       if (wl > 0) { wx /= wl; wz /= wl; }
-      const acc = me.onGround ? 13 : 2.5;
-      const k = Math.min(1, acc * dt);
-      me.vel.x += (wx * speed - me.vel.x) * k;
-      me.vel.z += (wz * speed - me.vel.z) * k;
-      if (locked && K.has('Space') && me.onGround) { me.vel.y = 7.2; me.onGround = false; }
-      me.vel.y -= 22 * dt;
+      const jump = locked && K.has(B.jump) && me.onGround;
+      if (me.slide && jump) this.endSlide(t);                       // jump out of a slide, keeping its momentum
+      if (me.slide) {
+        const S = me.slide;
+        S.t += dt;
+        if (wl > 0) {                                                // limited steering
+          const cur = Math.atan2(S.dx, S.dz), want = Math.atan2(wx, wz);
+          const d = ((want - cur + Math.PI * 3) % TAU) - Math.PI;
+          if (Math.abs(d) < 2.2) { const a = cur + clamp(d, -MOVE.slide.steer * dt, MOVE.slide.steer * dt); S.dx = Math.sin(a); S.dz = Math.cos(a); }
+        }
+        S.speed = Math.max(0, S.speed - S.decel * dt);
+        me.vel.x = S.dx * S.speed; me.vel.z = S.dz * S.speed;
+      } else {
+        // speed up / slow down smoothly: a little momentum when you let go of the keys
+        const acc = me.onGround && !jump ? (wl > 0 ? MOVE.accel : MOVE.decel) : MOVE.airAccel; // take-off keeps its momentum
+        const k = Math.min(1, acc * dt);
+        me.vel.x += (wx * speed - me.vel.x) * k;
+        me.vel.z += (wz * speed - me.vel.z) * k;
+      }
+      if (jump) { me.vel.y = MOVE.jump; me.onGround = false; }
+      me.vel.y -= MOVE.gravity * dt;
+      const fallV = me.vel.y;
       const h = me.crouch ? CROUCH_H : STAND_H;
       me.wasGround = me.onGround; // remembered so stairs / curbs can be stepped onto this frame
       me.onGround = false;
@@ -794,8 +889,27 @@ export class Game {
       this.moveAxis('z', me.vel.z * dt, h);
       this.moveAxis('y', me.vel.y * dt, h);
       if (me.pos.y <= 0) { me.pos.y = 0; me.vel.y = 0; me.onGround = true; }
+      if (me.onGround && !me.wasGround && fallV < -3) {             // landing: camera dips, boots thud
+        me.camVy = (me.camVy || 0) + Math.max(-1.6, fallV * 0.12);
+        this.app.sfx.step?.({ vol: Math.min(1.4, -fallV / 8) });
+      }
+      if (me.slide) {
+        const S = me.slide, moved = Math.hypot(me.vel.x, me.vel.z);
+        // stop when slow, after the time limit, off a ledge, or into a wall (no endless slides)
+        if (S.t >= MOVE.slide.maxTime || S.speed <= MOVE.slide.endSpeed * g.move || !me.onGround || moved < S.speed * 0.5) this.endSlide(t);
+      }
     }
     me.stepSmooth = (me.stepSmooth || 0) * Math.exp(-dt * 14);
+
+    // footsteps and camera bob share one step cycle with the third-person animation's stride
+    const hv = Math.hypot(me.vel.x, me.vel.z);
+    if (me.onGround && !me.slide && !flying && hv > 0.5) {
+      const stepLen = stepLength(hv, me.crouch ? 1 : 0);
+      const before = me.stepPhase || 0;
+      me.stepPhase = before + (hv * dt) / stepLen;
+      if (Math.floor(me.stepPhase) > Math.floor(before)) this.app.sfx.step?.({ vol: me.crouch ? 0.35 : me.sprint ? 1 : 0.7 });
+    }
+    me.moveT = (me.moveT || 0) + ((me.onGround && !me.slide && hv > 0.8 ? Math.min(1, hv / MOVE.run) : 0) - (me.moveT || 0)) * Math.min(1, dt * 8);
 
     // weapon
     me.adsT += ((ads && !me.sprint ? 1 : 0) - me.adsT) * Math.min(1, dt * (g.scoped ? 9 : 12));
@@ -828,16 +942,34 @@ export class Game {
     if (this.sendT <= 0) {
       this.sendT = 0.05;
       const moving = Math.hypot(me.vel.x, me.vel.z) > 0.6;
-      const fl = (me.crouch ? F_CROUCH : 0) | (moving ? F_MOVE : 0) | (me.sprint ? F_SPRINT : 0) | (me.adsT > 0.5 ? F_ADS : 0) | (me.reloadT > 0 ? F_RELOAD : 0) | (me.onGround ? 0 : F_AIR);
+      const fl = (me.crouch ? F_CROUCH : 0) | (moving ? F_MOVE : 0) | (me.sprint ? F_SPRINT : 0) | (me.adsT > 0.5 ? F_ADS : 0) | (me.reloadT > 0 ? F_RELOAD : 0) | (me.onGround ? 0 : F_AIR) | (me.slide ? F_SLIDE : 0);
       this.app.net.send({ t: 'in', x: +me.pos.x.toFixed(3), y: +me.pos.y.toFixed(3), z: +me.pos.z.toFixed(3), yaw: +me.yaw.toFixed(3), pitch: +me.pitch.toFixed(3), f: fl });
     }
   }
 
   updateCamera(dt, now) {
     const me = this.me;
-    me.crouchT += ((me.crouch ? 1 : 0) - me.crouchT) * Math.min(1, dt * 12);
-    let eye = EYE + (EYE_CROUCH - EYE) * me.crouchT + (me.stepSmooth || 0);
-    let yaw = me.yaw, pitch = me.pitch, roll = 0;
+    const cm = CAM_MOTION[this.app.settings.camMotion] ?? 1;   // camera motion setting: full / reduced / off
+    me.crouchT += ((me.crouch ? 1 : 0) - me.crouchT) * (1 - Math.exp(-MOVE.crouchRate * dt));
+    me.slideT = (me.slideT || 0) + ((me.slide ? 1 : 0) - (me.slideT || 0)) * (1 - Math.exp(-(me.slide ? MOVE.slide.inRate : MOVE.slide.outRate) * dt));
+    // landing dip: a damped spring, so the camera never snaps
+    me.camVy = (me.camVy || 0) + (-(me.camY || 0) * 140 - (me.camVy || 0) * 15) * dt;
+    me.camY = clamp((me.camY || 0) + me.camVy * dt, -0.25, 0.1);
+    // head bob locked to the footsteps: lowest as a foot lands
+    const ph = me.stepPhase || 0, hv = Math.hypot(me.vel.x, me.vel.z);
+    const bobA = (0.008 + 0.0035 * Math.min(hv, 8)) * (me.crouch ? 0.5 : 1) * (me.moveT || 0) * cm;
+    const bobY = (Math.abs(Math.sin(Math.PI * ph)) - 0.6) * 2 * bobA;
+    // eye height: a critically damped spring, so standing / crouching / sliding ease in and out with no jolt
+    const eyeTarget = me.slide ? MOVE.slide.eye : me.crouch ? EYE_CROUCH : EYE;
+    const w = me.slide ? 18 : 15;
+    if (me.eyeH == null) { me.eyeH = eyeTarget; me.eyeV = 0; }
+    {   // exact critically damped step: smooth start, no overshoot, same result at any frame rate
+      const y0 = me.eyeH - eyeTarget, c = me.eyeV + w * y0, ex = Math.exp(-w * dt);
+      me.eyeH = eyeTarget + (y0 + c * dt) * ex;
+      me.eyeV = (me.eyeV - w * c * dt) * ex;
+    }
+    let eye = me.eyeH + (me.stepSmooth || 0) + bobY + me.camY * cm;
+    let yaw = me.yaw, pitch = me.pitch, roll = (Math.sin(Math.PI * ph) * 0.004 * (me.moveT || 0) - me.slideT * 0.045) * cm;
     if (!me.alive && me.deadAt) {
       const t = Math.min(1, (now - me.deadAt) / 900);
       eye = EYE - t * 1.25;
@@ -854,7 +986,7 @@ export class Game {
     this.camera.rotation.set(pitch, yaw, roll);
     const base = this.app.settings.fov;
     const zoom = this.g ? this.g.zoom : 1;
-    const fov = base / (1 + (zoom - 1) * me.adsT);
+    const fov = base / (1 + (zoom - 1) * me.adsT) + me.slideT * 5 * cm * (1 - me.adsT); // a little speed feel in a slide
     if (Math.abs(this.camera.fov - fov) > 0.01) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
   }
 
@@ -868,16 +1000,19 @@ export class Game {
     if (!vm.visible) return;
     const P = this.vmPose;
     const t = me.adsT;
-    const moving = me.onGround && Math.hypot(me.vel.x, me.vel.z) > 0.8;
-    this.bobT += dt * (moving ? (me.sprint ? 14 : 9.5) : 1.4);
-    const bobAmt = (moving ? (me.sprint ? 1.8 : 1) : 0.15) * (1 - t * 0.85);
+    const moving = me.onGround && !me.slide && Math.hypot(me.vel.x, me.vel.z) > 0.8;
+    // gun bob follows the same step cycle as the camera and the footsteps (idle: slow breathing sway)
+    this.bobT += dt * 1.4;
+    const mt = me.moveT || 0;
+    const bobPh = Math.PI * (me.stepPhase || 0) * mt + this.bobT * (1 - mt);
+    const bobAmt = (0.15 + mt * ((me.sprint ? 1.8 : 1) * (me.crouch ? 0.55 : 1) - 0.15)) * (1 - t * 0.85);
     this.recoil.kick *= Math.exp(-dt * 16);
     this.recoil.rot *= Math.exp(-dt * 13);
     this.sway.x *= Math.exp(-dt * 8); this.sway.y *= Math.exp(-dt * 8);
     const sw = 1 - t * 0.7;
     vm.position.set(
-      P.hip.x + (P.ads.x - P.hip.x) * t + Math.sin(this.bobT) * 0.012 * bobAmt - this.sway.x * sw,
-      P.hip.y + (P.ads.y - P.hip.y) * t - Math.abs(Math.cos(this.bobT)) * 0.009 * bobAmt + this.sway.y * sw - (me.stepSmooth || 0) * 0.1,
+      P.hip.x + (P.ads.x - P.hip.x) * t + Math.sin(bobPh) * 0.012 * bobAmt - this.sway.x * sw,
+      P.hip.y + (P.ads.y - P.hip.y) * t - Math.abs(Math.cos(bobPh)) * 0.009 * bobAmt + this.sway.y * sw - (me.stepSmooth || 0) * 0.1 + (me.camY || 0) * 0.25,
       P.hip.z + (P.ads.z - P.hip.z) * t + this.recoil.kick * (1 - t * 0.5),
     );
     let rx = this.recoil.rot * (1 - t * 0.6), ry = (1 - t) * 0.03, rz = 0;
@@ -889,6 +1024,9 @@ export class Game {
     }
     me.sprintT = (me.sprintT || 0) + (((me.sprint && moving) ? 1 : 0) - (me.sprintT || 0)) * Math.min(1, dt * 9);
     rx -= me.sprintT * 0.35; ry += me.sprintT * 0.75; vm.position.x += me.sprintT * 0.03; vm.position.y -= me.sprintT * 0.04;
+    // slide: the weapon cants and drops a little toward the body (still ready to fire)
+    const sl = (me.slideT || 0) * (1 - t * 0.8);
+    rz += sl * 0.3; rx -= sl * 0.06; vm.position.x -= sl * 0.025; vm.position.y -= sl * 0.03;
     vm.rotation.set(rx, ry, rz);
   }
 
@@ -918,9 +1056,40 @@ export class Game {
       op.root.visible = true;
       op.root.position.copy(R.pos);
       op.root.rotation.y = R.yaw;
-      const far = R.pos.distanceToSquared(this.me.pos) > 2500;
+      // velocity and turn rate from the smoothed positions: they drive stride length, direction and leaning
+      const sdt = Math.max(1e-3, dt);
+      if (!R.lastPos) { R.lastPos = R.pos.clone(); R.vx = R.vz = 0; R.lastYaw = R.yaw; R.turn = 0; }
+      let vx = (R.pos.x - R.lastPos.x) / sdt, vz = (R.pos.z - R.lastPos.z) / sdt;
+      if (vx * vx + vz * vz > 400) vx = vz = 0;                          // respawn / teleport, not movement
+      const kv = 1 - Math.exp(-dt * 12);
+      R.vx += (vx - R.vx) * kv; R.vz += (vz - R.vz) * kv;
+      R.turn += ((((R.yaw - R.lastYaw + Math.PI * 3) % TAU) - Math.PI) / sdt - R.turn) * kv;
+      R.lastPos.copy(R.pos); R.lastYaw = R.yaw;
+      const dist2 = R.pos.distanceToSquared(this.me.pos);
+      const far = dist2 > 2500;
       if (!far || (this.frame & 1)) {
-        animateOperator(op, { moving: !!(R.f & F_MOVE), sprint: !!(R.f & F_SPRINT), crouch: !!(R.f & F_CROUCH), pitch: R.pitch, dead: !alive, dt: far ? dt * 2 : dt });
+        const sy = Math.sin(R.yaw), cy = Math.cos(R.yaw);
+        if (!R.groundFn) {
+          // ground height under a point given in the soldier's own space (for foot placement)
+          R.groundFn = (lx, lz) => {
+            const c = Math.cos(R.yaw), s = Math.sin(R.yaw);
+            return this.groundAt(R.pos.x + lx * c + lz * s, R.pos.z - lx * s + lz * c, R.pos.y) - R.pos.y;
+          };
+          R.stepFn = (side, speed) => {
+            const d = Math.sqrt(R.pos.distanceToSquared(this.me.pos));
+            const rx = Math.cos(this.me.yaw), rz = -Math.sin(this.me.yaw);
+            const pan = ((R.pos.x - this.me.pos.x) * rx + (R.pos.z - this.me.pos.z) * rz) / Math.max(1, d);
+            this.app.sfx.step?.({ dist: d, pan, vol: (R.f & F_CROUCH) ? 0.35 : speed > 6.5 ? 1 : 0.7 });
+          };
+        }
+        animateOperator(op, {
+          dt: far ? dt * 2 : dt, dead: !alive, pitch: R.pitch,
+          vel: { f: -R.vx * sy - R.vz * cy, r: R.vx * cy - R.vz * sy }, turn: R.turn,
+          crouch: !!(R.f & F_CROUCH), slide: !!(R.f & F_SLIDE), sprint: !!(R.f & F_SPRINT),
+          air: !!(R.f & F_AIR), reload: !!(R.f & F_RELOAD),
+          ground: dist2 < 900 ? R.groundFn : null,       // feet on steps / crates for anyone within 30 m
+          onStep: dist2 < 625 && alive ? R.stepFn : null, // footsteps you can hear within 25 m
+        });
       }
       if (!alive) op.root.position.y = R.pos.y + (op.deadT * 0.15);
       op.shadow.visible = alive;

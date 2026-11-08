@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { loadAssets, A, iconHTML, setGunIcon, prefetchGuns } from './assets.js';
 import { Net } from './net.js';
 import { Sfx } from './audio.js';
-import { Game } from './game.js';
+import { Game, DEFAULT_KEYS, keyName } from './game.js';
 import { MenuScene } from './menu3d.js';
 import { DEFAULT_SKIN, cleanSkin, SKIN_OPTIONS, cleanBots, MAX_BOTS, BOT_SKILL } from '../shared/core.js';
 import { MAPS } from '../shared/maps.js';
@@ -24,7 +24,8 @@ const profile = {
   skin: cleanSkin(store.get('skin', DEFAULT_SKIN)),
   bots: cleanBots(store.get('bots', null)),
 };
-const settings = { sens: 1, fov: 80, volume: 0.7, quality: 'auto', showFps: false, ...store.get('settings', {}) };
+const settings = { sens: 1, fov: 80, volume: 0.7, quality: 'auto', showFps: false, crouchMode: 'hold', camMotion: 'full', ...store.get('settings', {}) };
+settings.keys = { ...DEFAULT_KEYS, ...(settings.keys || {}) };
 const save = () => {
   store.set('name', profile.name); store.set('coins', profile.coins); store.set('owned', profile.owned);
   store.set('gun', profile.gun); store.set('skin', profile.skin); store.set('settings', settings);
@@ -408,6 +409,42 @@ function buildMenu() {
   bind('set-vol', 'volume', v => Math.round(v * 100), () => sfx.setVolume(settings.volume));
   bind('set-quality', 'quality', v => v, applyQuality);
   bind('set-fps', 'showFps', v => v, () => { $('fps').textContent = ''; });
+  bind('set-crouch', 'crouchMode', v => v, () => { if (game) game.me.crouchToggle = false; });
+  bind('set-cam', 'camMotion', v => v);
+  buildKeybinds();
+}
+
+// ------------------------------------------------------------------ key bindings (pause menu > CONTROLS)
+const ACTIONS = [['forward', 'FORWARD'], ['back', 'BACK'], ['left', 'LEFT'], ['right', 'RIGHT'], ['sprint', 'SPRINT'], ['crouch', 'CROUCH / SLIDE'], ['jump', 'JUMP'], ['reload', 'RELOAD']];
+let waitingKey = null;
+function renderKeybinds() {
+  const K = settings.keys;
+  $('keybinds').innerHTML = ACTIONS.map(([a, label]) =>
+    `<div class="kb-row"><span>${label}</span><button class="kb-key ${waitingKey === a ? 'wait' : ''}" data-a="${a}">${waitingKey === a ? 'PRESS A KEY' : keyName(K[a])}</button></div>`).join('');
+  const notes = [];
+  const used = {};
+  for (const [a, label] of ACTIONS) (used[K[a]] = used[K[a]] || []).push(label);
+  for (const k in used) if (used[k].length > 1) notes.push(`${used[k].join(' and ')} share ${keyName(k)}.`);
+  if (Object.values(K).some(k => /^(Control|Meta)/.test(k))) notes.push('Careful: Ctrl + W closes the browser tab, so W while holding Ctrl leaves the game.');
+  $('kb-note').textContent = notes.join(' ');
+  if (game) document.querySelector('#deploy .controls-help').textContent = game.controlsText();
+}
+function buildKeybinds() {
+  const showKeys = (on) => { $('pause-main').hidden = on; $('pause-keys').hidden = !on; waitingKey = null; renderKeybinds(); };
+  $('pause-controls').onclick = () => { sfx.ui(); showKeys(true); };
+  $('kb-done').onclick = () => { sfx.ui(); showKeys(false); };
+  $('kb-reset').onclick = () => { sfx.ui(); settings.keys = { ...DEFAULT_KEYS }; save(); waitingKey = null; renderKeybinds(); };
+  $('keybinds').onclick = (e) => { const b = e.target.closest('[data-a]'); if (!b) return; sfx.ui(); waitingKey = b.dataset.a; renderKeybinds(); };
+  addEventListener('keydown', (e) => {
+    if (!waitingKey) return;
+    e.preventDefault(); e.stopPropagation();
+    if (e.code !== 'Escape' && e.code !== 'Tab') { settings.keys[waitingKey] = e.code; save(); }
+    waitingKey = null;
+    renderKeybinds();
+  }, true);
+  // leaving the pause menu always comes back to the main settings page
+  document.addEventListener('pointerlockchange', () => { if (document.pointerLockElement) showKeys(false); });
+  renderKeybinds();
 }
 
 function renderParty() {
