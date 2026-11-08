@@ -8,6 +8,7 @@
 #   --preview     also render contact sheets into client/assets/preview_*.png
 #   --no-icons    skip rendering the 50 weapon pictures (faster)
 #   --only 0,4,5  only build these guns (for quick iteration)
+#   --operator-only  only rebuild operator.glb
 #
 # Output:
 #   client/assets/guns/gun_XX.glb   one small file per weapon (the game loads them on demand)
@@ -25,12 +26,13 @@ GUNS = json.load(open(os.path.join(ROOT, 'client', 'shared', 'guns.json'), encod
 OUT = os.path.join(ROOT, 'client', 'assets')
 GUN_DIR = os.path.join(OUT, 'guns')
 ICON_DIR = os.path.join(OUT, 'icons')
-for d in (OUT, GUN_DIR, ICON_DIR):
-    os.makedirs(d, exist_ok=True)
 ARGS = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 PREVIEW = '--preview' in ARGS
-ICONS = '--no-icons' not in ARGS
+OPERATOR_ONLY = '--operator-only' in ARGS   # just rebuild operator.glb (no guns, no pictures)
+ICONS = '--no-icons' not in ARGS and not OPERATOR_ONLY
 ONLY = [int(a) for a in ARGS[ARGS.index('--only') + 1].split(',')] if '--only' in ARGS else None
+for d in (OUT, GUN_DIR) + ((ICON_DIR,) if ICONS else ()):
+    os.makedirs(d, exist_ok=True)
 PI = math.pi
 
 
@@ -780,26 +782,32 @@ def build_operator():
         b.box((0, 0.114, 1.035), (0.05, 0.01, 0.035), M['brass'])
     pel = part('pelvis', pelvis, PEL)
 
-    # legs
+    # legs: thigh (leg_*), shin and foot, so knees and ankles can bend
     for side, sx in (('R', 1), ('L', -1)):
         x = 0.1 * sx
-        def leg(b, x=x):
+        HIP, KNEE, ANKLE = (x, 0, 0.93), (x, 0, 0.5), (x, 0, 0.11)
+        def thigh(b, x=x):
             b.box((x, 0.0, 0.71), (0.16, 0.18, 0.44), M['pants'], bev=0.025, taper=(1.08, 1.05))
+        lg = part('leg_' + side, thigh, HIP)
+        def shin(b, x=x):
             b.box((x, 0.0, 0.31), (0.14, 0.16, 0.4), M['pants'], bev=0.02, taper=(1.1, 1.08))
+            b.box((x, 0.0, 0.5), (0.15, 0.17, 0.1), M['pants'], bev=0.035)    # knee: fills the joint when it bends
+            b.box((x, 0.0, 0.15), (0.152, 0.172, 0.07), M['boots'], bev=0.01)  # boot shaft
+        sh = part('shin_' + side, shin, KNEE, lg, HIP)
+        def foot(b, x=x):
             b.box((x, 0.035, 0.065), (0.15, 0.27, 0.13), M['boots'], bev=0.025)
             b.box((x, 0.035, 0.008), (0.155, 0.275, 0.018), M['dark'])
-            b.box((x, 0.0, 0.15), (0.152, 0.172, 0.07), M['boots'], bev=0.01)
-        lg = part('leg_' + side, leg, (x, 0, 0.93))
+        part('foot_' + side, foot, ANKLE, sh, KNEE)
         def pad(b, x=x):
             b.box((x, 0.088, 0.5), (0.13, 0.04, 0.12), M['gear'], bev=0.015)
             b.box((x, 0.11, 0.5), (0.08, 0.01, 0.07), M['dark'])
-        part('knee_pads_' + side, pad, (x, 0, 0.93), lg, (x, 0, 0.93))
+        part('knee_pads_' + side, pad, KNEE, sh, KNEE)
         if side == 'R':
             def holster(b, x=x):
                 b.box((x + 0.09, 0.0, 0.72), (0.04, 0.15, 0.22), M['gear'], bev=0.01)
                 b.box((x + 0.1, 0.0, 0.8), (0.04, 0.08, 0.06), M['dark'])
                 b.box((x, 0.0, 0.84), (0.17, 0.19, 0.03), M['gear'])
-            part('thigh_rig', holster, (x, 0, 0.93), lg, (x, 0, 0.93))
+            part('thigh_rig', holster, HIP, lg, HIP)
 
     # torso
     TOR = (0, 0, 1.04)
@@ -1160,11 +1168,13 @@ def render_icons(guns):
 
 # ---------------------------------------------------------------- main
 bpy.ops.wm.read_factory_settings(use_empty=True)
-guns = build_guns()
-total = 0
-for gid, ob in guns.items():
-    total += export(with_children(ob), os.path.join(GUN_DIR, 'gun_%02d.glb' % gid))
-print('exported %d guns, %d KB total' % (len(guns), total // 1024))
+guns = {}
+if not OPERATOR_ONLY:
+    guns = build_guns()
+    total = 0
+    for gid, ob in guns.items():
+        total += export(with_children(ob), os.path.join(GUN_DIR, 'gun_%02d.glb' % gid))
+    print('exported %d guns, %d KB total' % (len(guns), total // 1024))
 if ICONS:
     render_icons(guns)  # before the operator exists, so it is not in the pictures
 

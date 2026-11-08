@@ -1,5 +1,6 @@
 # Turns a detailed, skinned operator model (skull_operator.glb) into the game's light "KNOCK OFF GHOST"
-# operator: the same 9 rigid parts the normal soldier uses (so the game's animation works unchanged),
+# operator: the same 13 rigid parts the normal soldier uses (thigh, shin and foot per leg, so the game's
+# animation and foot placement drive it unchanged),
 # ~7k triangles, colours baked into the vertices, one small texture for the skull mask, Draco-compressed.
 #
 #   "C:\Program Files\Blender Foundation\Blender 5.2\blender.exe" --background --factory-startup
@@ -14,9 +15,11 @@ if not args:
 SRC = os.path.abspath(args[0])
 OUT = os.path.abspath(args[1] if len(args) > 1 else os.path.join(os.path.dirname(__file__), '..', 'client', 'assets', 'ghost.glb'))
 
-PARTS = ['pelvis', 'torso', 'head', 'arm_R', 'forearm_R', 'arm_L', 'forearm_L', 'leg_L', 'leg_R']
-PARENT = {'torso': 'pelvis', 'head': 'torso', 'arm_R': 'torso', 'arm_L': 'torso', 'forearm_R': 'arm_R', 'forearm_L': 'arm_L'}
-TARGET_TRIS = {'pelvis': 600, 'torso': 2000, 'head': 1300, 'arm_R': 300, 'arm_L': 300, 'forearm_R': 500, 'forearm_L': 500, 'leg_L': 800, 'leg_R': 800}
+PARTS = ['pelvis', 'torso', 'head', 'arm_R', 'forearm_R', 'arm_L', 'forearm_L', 'leg_L', 'shin_L', 'foot_L', 'leg_R', 'shin_R', 'foot_R']
+PARENT = {'torso': 'pelvis', 'head': 'torso', 'arm_R': 'torso', 'arm_L': 'torso', 'forearm_R': 'arm_R', 'forearm_L': 'arm_L',
+          'shin_L': 'leg_L', 'foot_L': 'shin_L', 'shin_R': 'leg_R', 'foot_R': 'shin_R'}
+TARGET_TRIS = {'pelvis': 600, 'torso': 2000, 'head': 1300, 'arm_R': 300, 'arm_L': 300, 'forearm_R': 500, 'forearm_L': 500,
+               'leg_L': 420, 'shin_L': 380, 'foot_L': 260, 'leg_R': 420, 'shin_R': 380, 'foot_R': 260}
 FACE_MAT = 'Skull_Balaclava'      # keeps its texture (the skull print); everything else becomes vertex colour
 FACE_TEX = 512
 MIN_SIZE = 0.035                  # parts smaller than this (m) vanish at game distance: boot lugs, eyelets, laces...
@@ -31,8 +34,12 @@ def part_for(bone):
         return 'pelvis'
     if bone in ('Neck', 'Head'):
         return 'head'
-    if side and ('UpLeg' in bone or bone.endswith(('Leg', 'Foot', 'ToeBase'))):
-        return 'leg_' + side
+    if side and 'UpLeg' in bone:
+        return 'leg_' + side          # thigh
+    if side and bone.endswith('Leg'):
+        return 'shin_' + side
+    if side and bone.endswith(('Foot', 'ToeBase')):
+        return 'foot_' + side
     if side and bone.endswith('ForeArm') or side and 'Hand' in bone:
         return 'forearm_' + side
     if side and bone.endswith('Arm'):
@@ -70,6 +77,8 @@ PIVOT = {
     'arm_L': arm.pose.bones['LeftArm'].head, 'arm_R': arm.pose.bones['RightArm'].head,
     'forearm_L': arm.pose.bones['LeftForeArm'].head, 'forearm_R': arm.pose.bones['RightForeArm'].head,
     'leg_L': arm.pose.bones['LeftUpLeg'].head, 'leg_R': arm.pose.bones['RightUpLeg'].head,
+    'shin_L': arm.pose.bones['LeftLeg'].head, 'shin_R': arm.pose.bones['RightLeg'].head,
+    'foot_L': arm.pose.bones['LeftFoot'].head, 'foot_R': arm.pose.bones['RightFoot'].head,
 }
 PIVOT = {k: W @ v for k, v in PIVOT.items()}
 
