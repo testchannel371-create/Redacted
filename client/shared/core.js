@@ -18,7 +18,7 @@ export const TEAMS = [
 export function coinsFor(n) { return 50 + 50 * Math.max(0, Math.ceil((n - 10) / 5)); }
 
 export const EYE = 1.6, EYE_CROUCH = 1.15;
-export const F_ALIVE = 1, F_CROUCH = 2, F_MOVE = 4, F_SPRINT = 8, F_ADS = 16, F_RELOAD = 32, F_AIR = 64;
+export const F_ALIVE = 1, F_CROUCH = 2, F_MOVE = 4, F_SPRINT = 8, F_ADS = 16, F_RELOAD = 32, F_AIR = 64, F_SLIDE = 128;
 
 const RESPAWN = 4, REGEN_DELAY = 4, REGEN_RATE = 35;
 const VOTE_SECONDS = 12, VOTE_CHOICES = 3;
@@ -486,7 +486,7 @@ class Match {
     p.z = Math.max(-H, Math.min(H, m.z));
     p.y = Math.max(0, Math.min(admin ? 200 : 40, m.y));
     p.yaw = m.yaw; p.pitch = Math.max(-1.6, Math.min(1.6, m.pitch));
-    p.f = ((m.f | 0) & ~F_ALIVE & 127) | F_ALIVE;
+    p.f = ((m.f | 0) & ~F_ALIVE & 255) | F_ALIVE; // a slide also sends F_CROUCH, so its hitbox is the low one
   }
 
   eye(p) { return p.y + ((p.f & F_CROUCH) ? EYE_CROUCH : EYE); }
