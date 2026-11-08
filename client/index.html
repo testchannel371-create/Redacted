@@ -220,17 +220,28 @@
   <div id="eliminated" hidden><div class="elim-text">ELIMINATED</div><div id="elim-by"></div><div id="elim-timer"></div></div>
   <div id="winner" hidden><div id="win-text" class="win-text">WINNER</div><div id="win-sub"></div><div id="win-coins"></div><div id="win-next"></div><div id="vote-row"></div></div>
   <div id="scoreboard" hidden></div>
-  <div id="deploy" hidden><div class="deploy-box"><div class="deploy-map" id="deploy-map">CITADEL</div><div class="deploy-sub" id="deploy-sub"></div><button id="deploy-btn" class="btn accent big">CLICK TO DEPLOY</button><div class="controls-help">WASD move · SPACE jump · SHIFT sprint · C crouch · MOUSE aim &amp; shoot · RIGHT CLICK aim down sights · R reload · TAB scores · ESC pause</div></div></div>
+  <div id="deploy" hidden><div class="deploy-box"><div class="deploy-map" id="deploy-map">CITADEL</div><div class="deploy-sub" id="deploy-sub"></div><button id="deploy-btn" class="btn accent big">CLICK TO DEPLOY</button><div class="controls-help">WASD move · SPACE jump · SHIFT sprint · C crouch · C while sprinting: slide · MOUSE aim &amp; shoot · RIGHT CLICK aim down sights · R reload · TAB scores · ESC pause</div></div></div>
   <div id="pause" hidden>
     <div class="pause-box">
       <h2>PAUSED</h2>
-      <button id="pause-resume" class="btn accent big">RESUME</button>
-      <label class="set">MOUSE SENSITIVITY <input id="set-sens" type="range" min="0.2" max="3" step="0.05"><span id="set-sens-v"></span></label>
-      <label class="set">FIELD OF VIEW <input id="set-fov" type="range" min="60" max="100" step="1"><span id="set-fov-v"></span></label>
-      <label class="set">VOLUME <input id="set-vol" type="range" min="0" max="1" step="0.05"><span id="set-vol-v"></span></label>
-      <label class="set">GRAPHICS <select id="set-quality"><option value="auto">AUTO (recommended)</option><option value="low">LOW (school laptop)</option><option value="med">MEDIUM</option><option value="high">HIGH</option></select></label>
-      <label class="set">SHOW FPS <input id="set-fps" type="checkbox"></label>
-      <button id="pause-leave" class="btn ghost">LEAVE MATCH</button>
+      <div id="pause-main">
+        <button id="pause-resume" class="btn accent big">RESUME</button>
+        <label class="set">MOUSE SENSITIVITY <input id="set-sens" type="range" min="0.2" max="3" step="0.05"><span id="set-sens-v"></span></label>
+        <label class="set">FIELD OF VIEW <input id="set-fov" type="range" min="60" max="100" step="1"><span id="set-fov-v"></span></label>
+        <label class="set">VOLUME <input id="set-vol" type="range" min="0" max="1" step="0.05"><span id="set-vol-v"></span></label>
+        <label class="set">GRAPHICS <select id="set-quality"><option value="auto">AUTO (recommended)</option><option value="low">LOW (school laptop)</option><option value="med">MEDIUM</option><option value="high">HIGH</option></select></label>
+        <label class="set">CROUCH <select id="set-crouch"><option value="hold">HOLD the key</option><option value="toggle">TOGGLE (press once)</option></select></label>
+        <label class="set">CAMERA MOTION <select id="set-cam"><option value="full">FULL</option><option value="reduced">REDUCED</option><option value="off">OFF (no bob or tilt)</option></select></label>
+        <label class="set">SHOW FPS <input id="set-fps" type="checkbox"></label>
+        <button id="pause-controls" class="btn ghost">CONTROLS</button>
+        <button id="pause-leave" class="btn ghost">LEAVE MATCH</button>
+      </div>
+      <div id="pause-keys" hidden>
+        <p class="kb-help">Click a key, then press the new one (ESC cancels).</p>
+        <div id="keybinds"></div>
+        <p class="kb-note" id="kb-note"></p>
+        <div class="kb-btns"><button id="kb-reset" class="btn ghost">RESET KEYS</button><button id="kb-done" class="btn accent">DONE</button></div>
+      </div>
     </div>
   </div>
   <div id="fps"></div>

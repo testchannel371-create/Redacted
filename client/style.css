@@ -378,6 +378,16 @@ body.ingame #grain { background: radial-gradient(ellipse at center, transparent 
 .set select { grid-column: 2 / 4; background: rgba(0,0,0,0.35); color: var(--text); border: 1px solid var(--line); padding: 4px; }
 .set input[type=range] { accent-color: var(--accent); }
 .set input[type=checkbox] { justify-self: start; accent-color: var(--accent); width: 18px; height: 18px; }
+.pause-box .set { margin: 7px 0; }
+.kb-help { margin: 0 0 10px; color: var(--dim); font-size: 14px; }
+#keybinds { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; text-align: left; }
+.kb-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--dim); font-size: 14px; letter-spacing: 1px; }
+.kb-key { min-width: 104px; background: rgba(0,0,0,0.35); border: 1px solid var(--line); color: var(--text); font-family: var(--head); font-size: 20px; letter-spacing: 1px; padding: 3px 10px 0; }
+.kb-key:hover { border-color: var(--accent); }
+.kb-key.wait { border-color: var(--accent); color: var(--accent2); }
+.kb-note { min-height: 18px; margin: 10px 0 4px; color: var(--red); font-size: 14px; }
+.kb-btns { display: flex; gap: 10px; }
+.kb-btns .btn { flex: 1; }
 #fps { right: 240px; top: 18px; font-family: var(--body); font-size: 14px; color: var(--dim); }
 
 #made-by { position: fixed; right: 12px; bottom: 8px; z-index: 30; font-family: var(--head); font-size: 20px; letter-spacing: 2px; color: rgba(235,230,218,0.75); text-shadow: 0 2px 3px rgba(0,0,0,0.8); pointer-events: none; }
