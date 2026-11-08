@@ -581,12 +581,14 @@ function buildOperatorEditor() {
     sec('SHIRT COLOUR', swatches('shirt', PALETTE)) + sec('PANTS COLOUR', swatches('pants', PALETTE)) +
     sec('GEAR / VEST COLOUR', swatches('gear', PALETTE)) + sec('HEADGEAR COLOUR', swatches('hat', PALETTE)) +
     sec('EXTRAS', `<div class="toggle-row"><button class="opt" data-toggle="knees">KNEE PADS</button><button class="opt" data-toggle="gloves">GLOVES</button><button class="opt" data-toggle="rig">THIGH HOLSTER</button></div>`) +
-    sec('PRESETS', `<div class="toggle-row"><button class="opt" id="op-random">RANDOMISE</button><button class="opt" id="op-reset">RESET</button></div>`);
+    `<div class="op-sec presets"><h4>PRESETS</h4><div class="toggle-row"><button class="opt" id="op-random">RANDOMISE</button><button class="opt" id="op-reset">RESET</button>` +
+    `<button class="opt ghost-btn" id="op-ghost" title="Play as the skull-mask operator. Press again to go back."><span class="skull-ico"></span>KNOCK OFF GHOST</button></div></div>`;
   ed.addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
-    const s = { ...profile.skin };
+    const s = { ...profile.skin, ghost: false }; // any other choice goes back to the normal soldier
     const wrap = b.closest('[data-key]');
-    if (b.dataset.toggle) s[b.dataset.toggle] = !s[b.dataset.toggle];
+    if (b.id === 'op-ghost') s.ghost = !profile.skin.ghost;
+    else if (b.dataset.toggle) s[b.dataset.toggle] = !s[b.dataset.toggle];
     else if (b.id === 'op-random') {
       const pick = (a) => a[Math.floor(Math.random() * a.length)];
       Object.assign(s, { skin: pick(SKIN_TONES), shirt: pick(PALETTE), pants: pick(PALETTE), gear: pick(PALETTE), hat: pick(PALETTE),
@@ -599,7 +601,7 @@ function buildOperatorEditor() {
     setSkin(s);
   });
   ed.addEventListener('input', (e) => {
-    if (e.target.type === 'color') setSkin({ ...profile.skin, [e.target.dataset.key]: e.target.value });
+    if (e.target.type === 'color') setSkin({ ...profile.skin, ghost: false, [e.target.dataset.key]: e.target.value });
   });
   renderOperatorEditor();
 }
@@ -622,6 +624,8 @@ function renderOperatorEditor() {
     if (ci) ci.value = s[k];
   });
   document.querySelectorAll('#op-editor [data-toggle]').forEach(b => b.classList.toggle('active', !!s[b.dataset.toggle]));
+  $('op-ghost').classList.toggle('active', !!s.ghost);
+  $('op-editor').classList.toggle('ghost-on', !!s.ghost); // dims the soldier options while the ghost is worn
 }
 
 // ------------------------------------------------------------------ loop

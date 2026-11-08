@@ -208,13 +208,57 @@ function blobMat() {
   return _blobMat;
 }
 
+// ------------------------------------------------------------------ KNOCK OFF GHOST operator
+// A separate, ready-made model (blender/make_ghost.py) cut into the same 9 parts, so the same animation
+// drives it. Its parts are shared by every ghost on screen, and the file only downloads once someone
+// in view (or the player) picks it. Until it arrives the normal soldier stands in.
+// Colours for the first-person arms when playing as the ghost: navy sleeves, black gloves.
+export const GHOST_VM = { skin: '#252528', shirt: '#2c2f3b', gear: '#252528', gloves: true };
+let ghostLoad = null;
+export function loadGhost() {
+  if (!ghostLoad) {
+    ghostLoad = loadGlb('assets/ghost.glb').then((g) => {
+      const root = g.scene.getObjectByName('ghost_root');
+      const parts = {};
+      root.traverse((o) => {
+        const name = o.userData.name;
+        if (!BONES.includes(name)) return;
+        const meshes = [];
+        const add = (m, matrix) => meshes.push({ geo: m.geometry, mat: m.material.map ? ghostFaceMat(m.material.map) : OP_MAT, matrix });
+        if (o.isMesh) add(o, new THREE.Matrix4());
+        for (const c of o.children) if (c.isMesh && !c.userData.name) add(c, c.matrix.clone());
+        parts[name] = { pos: o.position.clone(), quat: o.quaternion.clone(), meshes };
+      });
+      if (BONES.some(b => !parts[b])) throw new Error('ghost.glb is missing parts');
+      A.ghost = parts;
+      return parts;
+    }).catch((e) => { ghostLoad = null; throw e; });
+  }
+  return ghostLoad;
+}
+let _faceMat;
+const ghostFaceMat = (map) => _faceMat || (_faceMat = new THREE.MeshLambertMaterial({ map }));
+
 export function setOperatorSkin(op, skin) {
   op.skin = skin;
+  if (skin.ghost && !A.ghost) loadGhost().then(() => { if (op.skin === skin) setOperatorSkin(op, skin); }, () => {});
+  const ghost = skin.ghost && A.ghost;
+  const { nodes } = analyseRig();
   for (const b of BONES) {
+    const P = op.P[b];
+    // each model has its own joint positions
+    const src = ghost ? A.ghost[b] : { pos: nodes[b].obj.position, quat: nodes[b].obj.quaternion };
+    P.position.copy(src.pos); P.quaternion.copy(src.quat);
+    P.userData.rest = P.position.clone();
     const old = op.meshes[b];
-    if (old) { op.P[b].remove(old); old.geometry.dispose(); }
-    const m = new THREE.Mesh(boneGeometry(b, skin), OP_MAT);
-    op.P[b].add(m);
+    if (old) { P.remove(old); if (!old.userData.shared) old.geometry.dispose(); }
+    let m;
+    if (ghost) {
+      m = new THREE.Group();
+      m.userData.shared = true; // the ghost's geometry belongs to every ghost: never dispose it
+      for (const g of A.ghost[b].meshes) { const mm = new THREE.Mesh(g.geo, g.mat); mm.applyMatrix4(g.matrix); m.add(mm); }
+    } else m = new THREE.Mesh(boneGeometry(b, skin), OP_MAT);
+    P.add(m);
     op.meshes[b] = m;
   }
 }

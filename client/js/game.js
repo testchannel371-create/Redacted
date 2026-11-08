@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { MAPS, mapData, raycastMap, rayBox, HITBOX } from '../shared/maps.js';
 import { MODES, TEAMS, EYE, EYE_CROUCH, F_ALIVE, F_CROUCH, F_MOVE, F_SPRINT, F_ADS, F_RELOAD, F_AIR } from '../shared/core.js';
-import { A, makeOperator, setOperatorSkin, setOperatorGun, animateOperator, cloneGun, opMaterial, loadGun, setGunIcon } from './assets.js';
+import { A, makeOperator, setOperatorSkin, setOperatorGun, animateOperator, cloneGun, opMaterial, loadGun, setGunIcon, GHOST_VM } from './assets.js';
 import { buildWorld, applyMapLighting, minimapImage } from './world.js';
 
 const $ = (id) => document.getElementById(id);
@@ -583,7 +583,8 @@ export class Game {
     const vm = new THREE.Group();
     const gun = cloneGun(i);
     vm.add(gun);
-    const skin = this.app.profile.skin;
+    const own = this.app.profile.skin;
+    const skin = own.ghost ? { ...own, ...GHOST_VM } : own;
     const part = (name) => {
       const o = A.vm[name].clone(true);
       o.traverse(c => { if (c.isMesh) { c.material = opMaterial(c.userData.mat, CUSTOM.includes(c.userData.mat) ? skin[c.userData.mat] : null); c.frustumCulled = false; } });
